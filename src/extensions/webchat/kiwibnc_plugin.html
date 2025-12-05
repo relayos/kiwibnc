@@ -31,6 +31,16 @@
                     <span v-if="!loading" v-html="buttonText"></span>
                     <i v-else class="fa fa-spinner fa-spin" aria-hidden="true" ></i>
                 </button>
+                <div v-if="oauthEnabled" class="kiwibnc-oauth">
+                    <button
+                        type="button"
+                        class="u-button u-button-secondary"
+                        :disabled="loading"
+                        @click="startOauthLogin"
+                    >
+                        Login with {{ oauthProvider }}
+                    </button>
+                </div>
                 <div @click="showLogin=!showLogin">
                     <span v-if="showLogin">
                         <a class="u-link">Create an account</a>
@@ -159,6 +169,15 @@
                 };
             },
             computed: {
+                oauthConfig() {
+                    return this.$state.settings.oauth || null;
+                },
+                oauthEnabled() {
+                    return !!(this.oauthConfig && this.oauthConfig.login_url);
+                },
+                oauthProvider() {
+                    return (this.oauthConfig && this.oauthConfig.provider) || 'OAuth';
+                },
                 greetingText() {
                     if (!this.showLogin) {
                         return 'Create an account';
@@ -208,6 +227,16 @@
                 );
             },
             mounted() {
+                const oauthLogin = this.getOauthLogin();
+                if (oauthLogin) {
+                    this.username = oauthLogin.username;
+                    this.password = oauthLogin.token;
+                    this.remember = true;
+                    this.tokenLogin = true;
+                    this.startUp();
+                    return;
+                }
+
                 const { username, token } = this.getLogin();
                 if (username && token) {
                     this.username = username;
@@ -281,17 +310,18 @@
                     const onClosed = () => {
                         this.loading = false;
 
-                        if (this.password.indexOf('__t1') === 0) {
-                            // Connect failed, clear out the auto login token to force the user
-                            // to enter a real password.
-                            this.password = '';
-                            this.remember = false;
-                            this.tokenLogin = false;
+                    if (this.password.indexOf('__t1') === 0) {
+                        // Connect failed, clear out the auto login token to force the user
+                        // to enter a real password.
+                        this.password = '';
+                        this.remember = false;
+                        this.tokenLogin = false;
+                        this.forgetOauthLogin();
 
-                            // This was an auto login so the token has either expired or removed.
-                            this.errorMessage = '';
-                        } else {
-                            this.errorMessage = net.last_error ||
+                        // This was an auto login so the token has either expired or removed.
+                        this.errorMessage = '';
+                    } else {
+                        this.errorMessage = net.last_error ||
                                 Misc.networkErrorMessage(net.state_error);
                         }
 
@@ -410,6 +440,38 @@
                 },
                 forgetLogin(username, token) {
                     this.$state.setting('auto_login', null);
+                    this.forgetOauthLogin();
+                },
+                startOauthLogin() {
+                    if (this.oauthEnabled) {
+                        window.location.href = this.oauthConfig.login_url;
+                    }
+                },
+                getOauthLogin() {
+                    try {
+                        const raw = window.localStorage.getItem('kiwibnc_oauth_login');
+                        if (!raw) {
+                            return null;
+                        }
+                        const data = JSON.parse(raw);
+                        if (!data.username || !data.token) {
+                            return null;
+                        }
+                        if (data.expires && Date.now() > data.expires) {
+                            this.forgetOauthLogin();
+                            return null;
+                        }
+                        return data;
+                    } catch (err) {
+                        return null;
+                    }
+                },
+                forgetOauthLogin() {
+                    try {
+                        window.localStorage.removeItem('kiwibnc_oauth_login');
+                    } catch (err) {
+                        // ignore
+                    }
                 },
             },
         };

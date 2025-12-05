@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const { parseBindString } = require('../../libs/helpers');
 
-module.exports = function(app) {
+module.exports = function(app, oauthClientConf) {
     let router = app.webserver.router;
 
     let publicPath = app.conf.relativePath(app.conf.get('webserver.public_dir'));
@@ -44,6 +44,10 @@ module.exports = function(app) {
             url: router.url('kiwi.bnc_plugin', {}),
             basePath: ctx.basePath,
         });
+
+        if (oauthClientConf) {
+            config.oauth = oauthClientConf;
+        }
 
         let extraConf = app.conf.get('webchat');
         for (let prop in extraConf) {

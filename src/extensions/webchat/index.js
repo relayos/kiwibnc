@@ -5,6 +5,7 @@ const path = require('path');
 const unzipper = require('unzipper');
 const routesAdmin = require('./routes_admin');
 const routesClient = require('./routes_client');
+const { registerRoutes: registerOauthRoutes, getClientConfig: getOauthClientConfig } = require('./routes_oauth');
 
 module.exports.init = async function init(hooks, app) {
     if (!app.conf.get('webserver.enabled') || !app.conf.get('webserver.public_dir')) {
@@ -14,8 +15,11 @@ module.exports.init = async function init(hooks, app) {
 
     await downloadKiwiIrc(publicPath, app.conf.get('webchat.download_url', ''));
 
+    const oauthConf = registerOauthRoutes(app);
+    const oauthClientConf = getOauthClientConfig(oauthConf);
+
     routesAdmin(app);
-    routesClient(app);
+    routesClient(app, oauthClientConf);
 
     // Add an admin auth token to admin clients
     hooks.on('available_isupports', async event => {
