@@ -3,8 +3,13 @@
 const fs = require('fs/promises');
 const path = require('path');
 
+const Helpers = require('../src/libs/helpers');
 const Config = require('../src/libs/config');
 const Database = require('../src/libs/database');
+const Crypt = require('../src/libs/crypt');
+const Users = require('../src/worker/users');
+const NetworkModel = require('../src/libs/dataModels/network');
+const UserModel = require('../src/libs/dataModels/user');
 
 function asBoolean(value) {
   if (typeof value === 'boolean') {
@@ -94,7 +99,14 @@ function upsertSeededAdmin(state, cfg) {
   return { user, network };
 }
 
-async function waitForProfile(profileDir) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForProfile(profileDir, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 30000;
+  const pollMs = options.pollMs ?? 250;
+  const deadline = Date.now() + timeoutMs;
   const files = ['config.ini', 'users.db'].map((file) => path.join(profileDir, file));
 
   for (;;) {
@@ -102,7 +114,10 @@ async function waitForProfile(profileDir) {
       await Promise.all(files.map((file) => fs.access(file)));
       return profileDir;
     } catch (err) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for KiwiBNC profile in ${profileDir}`);
+      }
+      await sleep(pollMs);
     }
   }
 }
@@ -114,6 +129,15 @@ async function openDb(profileDir) {
 
   const db = new Database(config);
   await db.init();
+  const cryptKey = config.get('database.crypt_key', '');
+  if (cryptKey.length !== 32) {
+    throw new Error('database.crypt_key must be 32 characters long');
+  }
+
+  db.crypt = new Crypt(cryptKey);
+  db.users = new Users(db);
+  db.factories.Network = NetworkModel.factory(db, db.crypt);
+  db.factories.User = UserModel.factory(db);
   return db;
 }
 
@@ -121,10 +145,14 @@ async function upsertSeededAdminDb(db, cfg) {
   let user = await db.factories.User.query()
     .where('username', 'LIKE', cfg.username)
     .first();
+  if (user) {
+    user = db.factories.User.fromDbResult(user);
+  }
 
   if (!user) {
     user = db.factories.User();
     user.username = cfg.username;
+    user.created_at = Helpers.now();
   }
 
   user.password = cfg.password;
@@ -135,6 +163,9 @@ async function upsertSeededAdminDb(db, cfg) {
     .where('user_id', user.id)
     .where('name', 'LIKE', cfg.networkName)
     .first();
+  if (network) {
+    network = db.factories.Network.fromDbResult(network);
+  }
 
   if (!network) {
     network = db.factories.Network();
