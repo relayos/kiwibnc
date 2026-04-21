@@ -133,7 +133,16 @@ async function openDb(profileDir) {
   }
 
   const db = new Database(config);
-  await db.init();
+  try {
+    await db.init();
+  } catch (err) {
+    try {
+      await closeDb(db);
+    } catch (closeErr) {
+      console.error('Failed to close KiwiBNC DB after init failure:', closeErr && closeErr.stack ? closeErr.stack : closeErr);
+    }
+    throw err;
+  }
   db.crypt = new Crypt(cryptKey);
   db.users = new Users(db);
   db.factories.Network = NetworkModel.factory(db, db.crypt);
@@ -210,13 +219,27 @@ async function main() {
   const profileDir = path.join(process.env.HOME || '/data', '.kiwibnc');
   const cfg = parseSeedConfig(raw);
   let db = null;
+  let primaryError = null;
   await waitForProfile(profileDir);
   try {
     db = await openDb(profileDir);
     await upsertSeededAdminDb(db, cfg);
     console.log(`Seeded KiwiBNC admin user ${cfg.username} in ${profileDir}`);
+  } catch (err) {
+    primaryError = err;
   } finally {
-    await closeDb(db);
+    try {
+      await closeDb(db);
+    } catch (cleanupErr) {
+      console.error('Failed to close KiwiBNC DB after seeding:', cleanupErr && cleanupErr.stack ? cleanupErr.stack : cleanupErr);
+      if (!primaryError) {
+        primaryError = cleanupErr;
+      }
+    }
+  }
+
+  if (primaryError) {
+    throw primaryError;
   }
 }
 

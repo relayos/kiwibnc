@@ -279,6 +279,51 @@ describe('scripts/seed-admin.js', () => {
     }
   });
 
+  test('openDb closes a partially constructed database when init rejects', async () => {
+    jest.resetModules();
+
+    const destroyUsers = jest.fn().mockResolvedValue();
+    const destroyConnections = jest.fn().mockResolvedValue();
+    const initError = new Error('init failed');
+    const dbInstance = {
+      dbUsers: { destroy: destroyUsers },
+      dbConnections: { destroy: destroyConnections },
+      init: jest.fn().mockRejectedValue(initError),
+      factories: Object.create(null),
+    };
+    const DatabaseMock = jest.fn(() => dbInstance);
+
+    jest.doMock('../../src/libs/database', () => DatabaseMock);
+
+    try {
+      const { openDb: mockedOpenDb } = require('../../scripts/seed-admin');
+      const profileDir = makeProfileDir();
+
+      try {
+        fs.writeFileSync(
+          path.join(profileDir, 'config.ini'),
+          [
+            '[database]',
+            'users = "users.db"',
+            'crypt_key = "0123456789abcdef0123456789abcdef"',
+            '',
+          ].join('\n')
+        );
+        fs.writeFileSync(path.join(profileDir, 'users.db'), '');
+
+        await expect(mockedOpenDb(profileDir)).rejects.toThrow('init failed');
+        expect(DatabaseMock).toHaveBeenCalledTimes(1);
+        expect(destroyUsers).toHaveBeenCalledTimes(1);
+        expect(destroyConnections).toHaveBeenCalledTimes(1);
+      } finally {
+        fs.rmSync(profileDir, { recursive: true, force: true });
+      }
+    } finally {
+      jest.dontMock('../../src/libs/database');
+      jest.resetModules();
+    }
+  });
+
   test('closeDb destroys both database handles', async () => {
     const dbUsersDestroy = jest.fn().mockResolvedValue();
     const dbConnectionsDestroy = jest.fn().mockResolvedValue();
