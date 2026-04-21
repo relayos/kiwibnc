@@ -127,13 +127,13 @@ async function openDb(profileDir) {
   const config = new Config(configPath);
   config.load();
 
-  const db = new Database(config);
-  await db.init();
   const cryptKey = config.get('database.crypt_key', '');
   if (cryptKey.length !== 32) {
     throw new Error('database.crypt_key must be 32 characters long');
   }
 
+  const db = new Database(config);
+  await db.init();
   db.crypt = new Crypt(cryptKey);
   db.users = new Users(db);
   db.factories.Network = NetworkModel.factory(db, db.crypt);
@@ -185,6 +185,22 @@ async function upsertSeededAdminDb(db, cfg) {
   return { user, network };
 }
 
+async function closeDb(db) {
+  if (!db) {
+    return;
+  }
+
+  const closers = [];
+  if (db.dbUsers && typeof db.dbUsers.destroy === 'function') {
+    closers.push(db.dbUsers.destroy());
+  }
+  if (db.dbConnections && typeof db.dbConnections.destroy === 'function') {
+    closers.push(db.dbConnections.destroy());
+  }
+
+  await Promise.all(closers);
+}
+
 async function main() {
   const raw = process.env.RELAYOS_KIWIBNC_ADMIN_JSON;
   if (!raw) {
@@ -193,10 +209,15 @@ async function main() {
 
   const profileDir = path.join(process.env.HOME || '/data', '.kiwibnc');
   const cfg = parseSeedConfig(raw);
+  let db = null;
   await waitForProfile(profileDir);
-  const db = await openDb(profileDir);
-  await upsertSeededAdminDb(db, cfg);
-  console.log(`Seeded KiwiBNC admin user ${cfg.username} in ${profileDir}`);
+  try {
+    db = await openDb(profileDir);
+    await upsertSeededAdminDb(db, cfg);
+    console.log(`Seeded KiwiBNC admin user ${cfg.username} in ${profileDir}`);
+  } finally {
+    await closeDb(db);
+  }
 }
 
 if (require.main === module) {
@@ -212,5 +233,6 @@ module.exports = {
   waitForProfile,
   openDb,
   upsertSeededAdminDb,
+  closeDb,
   main,
 };

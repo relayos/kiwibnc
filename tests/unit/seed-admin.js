@@ -7,6 +7,7 @@ const {
   upsertSeededAdmin,
   openDb,
   upsertSeededAdminDb,
+  closeDb,
   waitForProfile,
 } = require('../../scripts/seed-admin');
 const Database = require('../../src/libs/database');
@@ -250,6 +251,45 @@ describe('scripts/seed-admin.js', () => {
       initSpy.mockRestore();
       fs.rmSync(profileDir, { recursive: true, force: true });
     }
+  });
+
+  test('openDb rejects an invalid crypt key before initialization', async () => {
+    const profileDir = makeProfileDir();
+    const initSpy = jest.spyOn(Database.prototype, 'init');
+
+    try {
+      fs.writeFileSync(
+        path.join(profileDir, 'config.ini'),
+        [
+          '[database]',
+          'users = "users.db"',
+          'crypt_key = "too-short"',
+          '',
+        ].join('\n')
+      );
+      fs.writeFileSync(path.join(profileDir, 'users.db'), '');
+
+      await expect(openDb(profileDir)).rejects.toThrow(
+        'database.crypt_key must be 32 characters long'
+      );
+      expect(initSpy).not.toHaveBeenCalled();
+    } finally {
+      initSpy.mockRestore();
+      fs.rmSync(profileDir, { recursive: true, force: true });
+    }
+  });
+
+  test('closeDb destroys both database handles', async () => {
+    const dbUsersDestroy = jest.fn().mockResolvedValue();
+    const dbConnectionsDestroy = jest.fn().mockResolvedValue();
+
+    await closeDb({
+      dbUsers: { destroy: dbUsersDestroy },
+      dbConnections: { destroy: dbConnectionsDestroy },
+    });
+
+    expect(dbUsersDestroy).toHaveBeenCalledTimes(1);
+    expect(dbConnectionsDestroy).toHaveBeenCalledTimes(1);
   });
 
   test('upsertSeededAdminDb persists and updates through the real model factories', async () => {
