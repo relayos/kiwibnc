@@ -1,6 +1,8 @@
 FROM node:20-bookworm-slim
 
 WORKDIR /app
+ENV HOME=/data \
+    KIWIBNC_DATA_DIR=/data
 
 COPY package*.json ./
 

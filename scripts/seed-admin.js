@@ -49,6 +49,14 @@ function nextId(items) {
   return items.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0) + 1;
 }
 
+function normalizeDbId(value) {
+  if (value && typeof value === 'object' && 'id' in value) {
+    return Number(value.id);
+  }
+
+  return Number(value);
+}
+
 function upsertSeededAdmin(state, cfg) {
   if (!state.users) {
     state.users = [];
@@ -167,9 +175,10 @@ async function upsertSeededAdminDb(db, cfg) {
   user.password = cfg.password;
   user.admin = true;
   await user.save();
+  const userId = normalizeDbId(user.id);
 
   let network = await db.factories.Network.query()
-    .where('user_id', user.id)
+    .where('user_id', userId)
     .where('name', 'LIKE', cfg.networkName)
     .first();
   if (network) {
@@ -178,7 +187,7 @@ async function upsertSeededAdminDb(db, cfg) {
 
   if (!network) {
     network = db.factories.Network();
-    network.user_id = user.id;
+    network.user_id = userId;
     network.name = cfg.networkName;
   }
 
@@ -218,28 +227,40 @@ async function main() {
 
   const profileDir = path.join(process.env.HOME || '/data', '.kiwibnc');
   const cfg = parseSeedConfig(raw);
-  let db = null;
-  let primaryError = null;
   await waitForProfile(profileDir);
-  try {
-    db = await openDb(profileDir);
-    await upsertSeededAdminDb(db, cfg);
-    console.log(`Seeded KiwiBNC admin user ${cfg.username} in ${profileDir}`);
-  } catch (err) {
-    primaryError = err;
-  } finally {
+
+  const deadline = Date.now() + 30000;
+  let lastError = null;
+
+  for (;;) {
+    let db = null;
+    let primaryError = null;
+
     try {
-      await closeDb(db);
-    } catch (cleanupErr) {
-      console.error('Failed to close KiwiBNC DB after seeding:', cleanupErr && cleanupErr.stack ? cleanupErr.stack : cleanupErr);
-      if (!primaryError) {
-        primaryError = cleanupErr;
+      db = await openDb(profileDir);
+      await upsertSeededAdminDb(db, cfg);
+      console.log(`Seeded KiwiBNC admin user ${cfg.username} in ${profileDir}`);
+      return;
+    } catch (err) {
+      primaryError = err;
+      lastError = err;
+    } finally {
+      try {
+        await closeDb(db);
+      } catch (cleanupErr) {
+        console.error('Failed to close KiwiBNC DB after seeding:', cleanupErr && cleanupErr.stack ? cleanupErr.stack : cleanupErr);
+        if (!primaryError) {
+          primaryError = cleanupErr;
+          lastError = cleanupErr;
+        }
       }
     }
-  }
 
-  if (primaryError) {
-    throw primaryError;
+    if (Date.now() >= deadline) {
+      throw lastError;
+    }
+
+    await sleep(500);
   }
 }
 
@@ -252,6 +273,7 @@ if (require.main === module) {
 
 module.exports = {
   parseSeedConfig,
+  normalizeDbId,
   upsertSeededAdmin,
   waitForProfile,
   openDb,

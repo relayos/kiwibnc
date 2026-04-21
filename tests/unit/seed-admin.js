@@ -5,6 +5,7 @@ const path = require('path');
 const {
   parseSeedConfig,
   upsertSeededAdmin,
+  normalizeDbId,
   openDb,
   upsertSeededAdminDb,
   closeDb,
@@ -109,6 +110,15 @@ function createMemoryDb() {
 }
 
 describe('scripts/seed-admin.js', () => {
+  test('config template disables public registration by default', () => {
+    const config = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'configProfileTemplate', 'config.ini'),
+      'utf8'
+    );
+
+    expect(config).toContain('public_register = false');
+  });
+
   test('parseSeedConfig normalizes the rendered admin JSON payload', () => {
     const cfg = parseSeedConfig(JSON.stringify({
       username: 'admin',
@@ -134,6 +144,11 @@ describe('scripts/seed-admin.js', () => {
       realname: 'Kiwi Admin',
       channels: '',
     });
+  });
+
+  test('normalizeDbId unwraps sqlite returning objects', () => {
+    expect(normalizeDbId({ id: 7 })).toBe(7);
+    expect(normalizeDbId(9)).toBe(9);
   });
 
   test('upsertSeededAdmin creates one user and one network, then updates in place', () => {
