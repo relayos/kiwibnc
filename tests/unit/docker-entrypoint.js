@@ -4,7 +4,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 describe('docker-entrypoint', () => {
-  test('links the persisted data directory to the default KiwiBNC home profile path', () => {
+  test('runs KiwiBNC with HOME set to the persisted data directory', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
     const homeDir = path.join(tmpDir, 'home');
     const dataDir = path.join(tmpDir, 'data');
@@ -17,7 +17,7 @@ describe('docker-entrypoint', () => {
         'docker-entrypoint.sh',
         'sh',
         '-c',
-        'test -L "$KIWIBNC_HOME/.kiwibnc" && test "$(readlink "$KIWIBNC_HOME/.kiwibnc")" = "$KIWIBNC_DATA_DIR"',
+        'test "$HOME" = "$KIWIBNC_DATA_DIR" && test ! -e "$KIWIBNC_HOME/.kiwibnc"',
       ],
       {
         cwd: path.resolve(__dirname, '..', '..'),

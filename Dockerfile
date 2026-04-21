@@ -11,7 +11,7 @@ COPY . .
 RUN mkdir -p /data
 RUN chmod +x /app/docker-entrypoint.sh
 
-EXPOSE 7778
+EXPOSE 80 6667
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "kiwibnc.js"]
