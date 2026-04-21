@@ -9,9 +9,9 @@ RUN npm ci --omit=dev
 COPY . .
 
 RUN mkdir -p /data
-
-ENV KIWIBNC_CONFIG=/data/config.ini
+RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 7778
 
-CMD ["node", "kiwibnc.js", "--config", "/data/config.ini"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["node", "kiwibnc.js"]
