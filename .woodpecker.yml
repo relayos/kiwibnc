@@ -1,0 +1,33 @@
+when:
+  - event: [push, pull_request]
+    branch: [relayos]
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      recursive: true
+      depth: 0
+
+steps:
+  - name: test-build
+    image: docker:28-cli
+    commands:
+      - docker build -t local/kiwibnc:test .
+
+  - name: publish-image
+    image: woodpeckerci/plugin-docker-buildx
+    when:
+      event: [push]
+      branch: [relayos]
+    settings:
+      repo: ghcr.io/relayos/kiwibnc
+      dockerfile: Dockerfile
+      context: .
+      tags:
+        - latest
+        - ${CI_COMMIT_SHA:0:7}
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_token
