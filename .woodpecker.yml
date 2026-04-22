@@ -10,6 +10,12 @@ clone:
       depth: 0
 
 steps:
+  - name: validation
+    image: node:20-alpine
+    commands:
+      - npm ci
+      - ./node_modules/.bin/jest tests/unit/docker-entrypoint.js tests/unit/seed-admin.js tests/unit/routes-oauth.js --runInBand
+
   - name: test-build
     image: woodpeckerci/plugin-docker-buildx
     settings:
