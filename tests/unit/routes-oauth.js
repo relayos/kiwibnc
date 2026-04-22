@@ -1,5 +1,8 @@
 'use strict';
 
+const { EventEmitter } = require('events');
+const https = require('https');
+
 jest.mock('../../src/libs/logger', () => () => ({
     info: jest.fn(),
     warn: jest.fn(),
@@ -7,6 +10,7 @@ jest.mock('../../src/libs/logger', () => () => ({
 }));
 
 const {
+    registerRoutes,
     __testHooks,
     buildOauthConfig,
 } = require('../../src/extensions/webchat/routes_oauth');
@@ -29,6 +33,30 @@ function setOauthEnv(values) {
     Object.assign(process.env, values);
 }
 
+function makeHttpsRequestSequence(sequence) {
+    return jest.spyOn(https, 'request').mockImplementation((options, cb) => {
+        const response = sequence.shift();
+        if (!response) {
+            throw new Error('unexpected https request');
+        }
+        const req = new EventEmitter();
+        req.write = jest.fn();
+        req.end = jest.fn(() => {
+            const res = new EventEmitter();
+            res.statusCode = response.statusCode || 200;
+            res.headers = response.headers || {};
+            cb(res);
+            process.nextTick(() => {
+                if (response.body) {
+                    res.emit('data', response.body);
+                }
+                res.emit('end');
+            });
+        });
+        return req;
+    });
+}
+
 describe('routes_oauth allowlist config', () => {
     beforeEach(() => {
         jest.resetAllMocks();
@@ -41,6 +69,12 @@ describe('routes_oauth allowlist config', () => {
         expect(__testHooks.parseAllowlist('{"allenday":"admin"}')).toEqual({
             allenday: 'admin',
         });
+    });
+
+    test('parseAllowlist rejects non-string allowlist targets', () => {
+        expect(() => __testHooks.parseAllowlist('{"allenday":42}')).toThrow(
+            'RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON values must be non-empty strings'
+        );
     });
 
     test('buildOauthConfig includes parsed allowlist when oauth env is complete', () => {
@@ -64,6 +98,23 @@ describe('routes_oauth allowlist config', () => {
         expect(conf.allowlist).toEqual({ allenday: 'admin' });
         expect(conf.provider).toBe('RelayOS');
         expect(conf.allowRegistration).toBe(false);
+    });
+
+    test('buildOauthConfig returns null when allowlist is empty', () => {
+        setOauthEnv({
+            KIWIBNC_OAUTH_CLIENT_ID: 'client-id',
+            KIWIBNC_OAUTH_CLIENT_SECRET: 'client-secret',
+            KIWIBNC_OAUTH_AUTH_URL: 'https://users.s.getrelayos.com/oauth/authorize',
+            KIWIBNC_OAUTH_TOKEN_URL: 'https://users.s.getrelayos.com/oauth/token',
+            KIWIBNC_OAUTH_REDIRECT_URI: 'https://bnc.s.getrelayos.com/oauth/callback',
+            RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON: '{}',
+        });
+
+        expect(buildOauthConfig({
+            conf: {
+                get: jest.fn((key, def) => (key === 'webchat' ? {} : def)),
+            },
+        })).toBeNull();
     });
 
     test('buildOauthConfig rejects invalid allowlist json', () => {
@@ -160,5 +211,125 @@ describe('routes_oauth local account resolution', () => {
         await expect(__testHooks.loadMappedUser(app, 'admin')).rejects.toThrow(
             'Mapped KiwiBNC user does not exist'
         );
+    });
+});
+
+describe('routes_oauth callback route', () => {
+    beforeEach(() => {
+        jest.resetAllMocks();
+        for (const key of OAUTH_ENV_KEYS) {
+            delete process.env[key];
+        }
+    });
+
+    test('callback exchanges token, resolves allowlist, and issues a mapped user token', async () => {
+        setOauthEnv({
+            KIWIBNC_OAUTH_CLIENT_ID: 'client-id',
+            KIWIBNC_OAUTH_CLIENT_SECRET: 'client-secret',
+            KIWIBNC_OAUTH_AUTH_URL: 'https://users.s.getrelayos.com/oauth/authorize',
+            KIWIBNC_OAUTH_TOKEN_URL: 'https://users.s.getrelayos.com/oauth/token',
+            KIWIBNC_OAUTH_REDIRECT_URI: 'https://bnc.s.getrelayos.com/oauth/callback',
+            KIWIBNC_OAUTH_USERINFO_URL: 'https://users.s.getrelayos.com/oauth/me',
+            RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON: '{"allenday":"admin"}',
+        });
+
+        const routes = {};
+        const app = {
+            conf: {
+                get: jest.fn((key) => (key === 'webchat' ? {} : false)),
+            },
+            webserver: {
+                router: {
+                    get: jest.fn((path, handler) => {
+                        routes[path] = handler;
+                    }),
+                },
+            },
+            userDb: {
+                getUser: jest.fn().mockResolvedValue({ id: 7, username: 'admin' }),
+                generateUserToken: jest.fn().mockResolvedValue('token-123'),
+            },
+        };
+
+        registerRoutes(app);
+        expect(routes['/oauth/callback']).toEqual(expect.any(Function));
+
+        const httpsSpy = makeHttpsRequestSequence([
+            { body: JSON.stringify({ access_token: 'access-123' }) },
+            { body: JSON.stringify({ user_login: 'allenday', email: 'ops@getrelayos.com' }) },
+        ]);
+
+        const ctx = {
+            query: { code: 'auth-code', state: 'state-123' },
+            cookies: {
+                get: jest.fn(() => 'state-123'),
+                set: jest.fn(),
+            },
+            ip: '127.0.0.1',
+        };
+
+        await routes['/oauth/callback'](ctx);
+
+        expect(ctx.status).toBeUndefined();
+        expect(ctx.type).toBe('text/html');
+        expect(ctx.body).toContain('kiwibnc_oauth_login');
+        expect(app.userDb.getUser).toHaveBeenCalledWith('admin');
+        expect(app.userDb.generateUserToken).toHaveBeenCalledWith(7, 7 * 24 * 3600, 'oauth-login', '127.0.0.1');
+        expect(httpsSpy).toHaveBeenCalledTimes(2);
+        httpsSpy.mockRestore();
+    });
+
+    test('callback rejects a bad oauth state before network calls', async () => {
+        setOauthEnv({
+            KIWIBNC_OAUTH_CLIENT_ID: 'client-id',
+            KIWIBNC_OAUTH_CLIENT_SECRET: 'client-secret',
+            KIWIBNC_OAUTH_AUTH_URL: 'https://users.s.getrelayos.com/oauth/authorize',
+            KIWIBNC_OAUTH_TOKEN_URL: 'https://users.s.getrelayos.com/oauth/token',
+            KIWIBNC_OAUTH_REDIRECT_URI: 'https://bnc.s.getrelayos.com/oauth/callback',
+            KIWIBNC_OAUTH_USERINFO_URL: 'https://users.s.getrelayos.com/oauth/me',
+            RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON: '{"allenday":"admin"}',
+        });
+
+        const routes = {};
+        const app = {
+            conf: {
+                get: jest.fn((key) => (key === 'webchat' ? {} : false)),
+            },
+            webserver: {
+                router: {
+                    get: jest.fn((path, handler) => {
+                        routes[path] = handler;
+                    }),
+                },
+            },
+            userDb: {
+                getUser: jest.fn(),
+                generateUserToken: jest.fn(),
+            },
+        };
+
+        registerRoutes(app);
+
+        const httpsSpy = jest.spyOn(https, 'request').mockImplementation(() => {
+            throw new Error('network should not be called');
+        });
+
+        const ctx = {
+            query: { code: 'auth-code', state: 'bad-state' },
+            cookies: {
+                get: jest.fn(() => 'state-123'),
+                set: jest.fn(),
+            },
+            ip: '127.0.0.1',
+        };
+
+        await routes['/oauth/callback'](ctx);
+
+        expect(ctx.status).toBe(400);
+        expect(ctx.body).toContain('OAuth state mismatch. Please try again.');
+        expect(app.userDb.getUser).not.toHaveBeenCalled();
+        expect(app.userDb.generateUserToken).not.toHaveBeenCalled();
+        expect(httpsSpy).not.toHaveBeenCalled();
+        httpsSpy.mockRestore();
     });
 });

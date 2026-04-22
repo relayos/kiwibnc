@@ -21,7 +21,19 @@ function parseAllowlist(raw) {
         throw new Error('RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON must decode to an object');
     }
 
-    return parsed;
+    const allowlist = {};
+    for (const [remoteLogin, localUsername] of Object.entries(parsed)) {
+        if (typeof localUsername !== 'string' || !localUsername.trim()) {
+            throw new Error('RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON values must be non-empty strings');
+        }
+        allowlist[remoteLogin] = localUsername;
+    }
+
+    return allowlist;
+}
+
+function hasAllowlistMappings(allowlist) {
+    return !!allowlist && Object.keys(allowlist).length > 0;
 }
 
 function buildOauthConfig(app) {
@@ -52,6 +64,11 @@ function buildOauthConfig(app) {
     });
 
     if (!clientId || !clientSecret || !authUrl || !tokenUrl || !redirectUri) {
+        return null;
+    }
+
+    if (!hasAllowlistMappings(allowlist)) {
+        l.warn('OAuth allowlist missing or empty; skipping OAuth routes');
         return null;
     }
 
@@ -316,7 +333,7 @@ function registerRoutes(app) {
 }
 
 function getClientConfig(oauthConf) {
-    if (!oauthConf) {
+    if (!oauthConf || !hasAllowlistMappings(oauthConf.allowlist)) {
         return null;
     }
 
