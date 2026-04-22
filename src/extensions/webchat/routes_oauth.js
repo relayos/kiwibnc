@@ -168,6 +168,27 @@ async function fetchUserInfo(oauthConf, token) {
     });
 }
 
+function decodeIdToken(idToken) {
+    if (!idToken || typeof idToken !== 'string') {
+        return null;
+    }
+
+    const parts = idToken.split('.');
+    if (parts.length < 2) {
+        return null;
+    }
+
+    try {
+        const payload = Buffer.from(
+            parts[1].replace(/-/g, '+').replace(/_/g, '/'),
+            'base64'
+        ).toString('utf8');
+        return JSON.parse(payload);
+    } catch (err) {
+        return null;
+    }
+}
+
 function setStateCookie(ctx, value) {
     ctx.cookies.set('kiwibnc_oauth_state', value, {
         httpOnly: true,
@@ -294,6 +315,13 @@ function registerRoutes(app) {
             userInfo = Object.assign(userInfo, fetched || {});
         } catch (err) {
             l.warn('OAuth userinfo fetch failed:', err.message);
+        }
+
+        if (!userInfo.user_login && tokenResp.id_token) {
+            const decoded = decodeIdToken(tokenResp.id_token);
+            if (decoded) {
+                userInfo = Object.assign({}, userInfo, decoded);
+            }
         }
 
         const infoKeys = Object.keys(userInfo || {}).filter(k => k !== 'id_token' && k !== 'access_token' && k !== 'refresh_token');

@@ -34,14 +34,19 @@ function setOauthEnv(values) {
 }
 
 function makeHttpsRequestSequence(sequence) {
-    return jest.spyOn(https, 'request').mockImplementation((options, cb) => {
+    const calls = [];
+    const bodies = [];
+    const spy = jest.spyOn(https, 'request').mockImplementation((options, cb) => {
         const response = sequence.shift();
         if (!response) {
             throw new Error('unexpected https request');
         }
         const req = new EventEmitter();
-        req.write = jest.fn();
+        req.write = jest.fn((chunk) => {
+            bodies.push(String(chunk));
+        });
         req.end = jest.fn(() => {
+            calls.push(options);
             const res = new EventEmitter();
             res.statusCode = response.statusCode || 200;
             res.headers = response.headers || {};
@@ -55,6 +60,7 @@ function makeHttpsRequestSequence(sequence) {
         });
         return req;
     });
+    return { spy, calls, bodies };
 }
 
 describe('routes_oauth allowlist config', () => {
@@ -254,9 +260,9 @@ describe('routes_oauth callback route', () => {
         registerRoutes(app);
         expect(routes['/oauth/callback']).toEqual(expect.any(Function));
 
-        const httpsSpy = makeHttpsRequestSequence([
-            { body: JSON.stringify({ access_token: 'access-123' }) },
-            { body: JSON.stringify({ user_login: 'allenday', email: 'ops@getrelayos.com' }) },
+        const httpsMock = makeHttpsRequestSequence([
+            { body: JSON.stringify({ access_token: 'access-123', id_token: 'header.eyJ1c2VyX2xvZ2luIjoiYWxsZW5kYXkifQ.sig' }) },
+            { body: JSON.stringify({ email: 'ops@getrelayos.com' }) },
         ]);
 
         const ctx = {
@@ -275,8 +281,26 @@ describe('routes_oauth callback route', () => {
         expect(ctx.body).toContain('kiwibnc_oauth_login');
         expect(app.userDb.getUser).toHaveBeenCalledWith('admin');
         expect(app.userDb.generateUserToken).toHaveBeenCalledWith(7, 7 * 24 * 3600, 'oauth-login', '127.0.0.1');
-        expect(httpsSpy).toHaveBeenCalledTimes(2);
-        httpsSpy.mockRestore();
+        expect(httpsMock.spy).toHaveBeenCalledTimes(2);
+        expect(httpsMock.calls[0]).toMatchObject({
+            method: 'POST',
+            hostname: 'users.s.getrelayos.com',
+            path: '/oauth/token',
+        });
+        expect(httpsMock.bodies[0]).toContain('grant_type=authorization_code');
+        expect(httpsMock.bodies[0]).toContain('code=auth-code');
+        expect(httpsMock.bodies[0]).toContain('redirect_uri=https%3A%2F%2Fbnc.s.getrelayos.com%2Foauth%2Fcallback');
+        expect(httpsMock.bodies[0]).toContain('client_id=client-id');
+        expect(httpsMock.bodies[0]).toContain('client_secret=client-secret');
+        expect(httpsMock.calls[1]).toMatchObject({
+            method: 'GET',
+            hostname: 'users.s.getrelayos.com',
+            path: '/oauth/me',
+            headers: {
+                Authorization: 'Bearer access-123',
+            },
+        });
+        httpsMock.spy.mockRestore();
     });
 
     test('callback rejects a bad oauth state before network calls', async () => {
