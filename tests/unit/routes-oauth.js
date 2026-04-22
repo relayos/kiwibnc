@@ -37,6 +37,12 @@ describe('routes_oauth allowlist config', () => {
         }
     });
 
+    test('parseAllowlist returns an object for valid json', () => {
+        expect(__testHooks.parseAllowlist('{"allenday":"admin"}')).toEqual({
+            allenday: 'admin',
+        });
+    });
+
     test('buildOauthConfig includes parsed allowlist when oauth env is complete', () => {
         setOauthEnv({
             KIWIBNC_OAUTH_CLIENT_ID: 'client-id',
@@ -56,6 +62,8 @@ describe('routes_oauth allowlist config', () => {
         });
 
         expect(conf.allowlist).toEqual({ allenday: 'admin' });
+        expect(conf.provider).toBe('RelayOS');
+        expect(conf.allowRegistration).toBe(false);
     });
 
     test('buildOauthConfig rejects invalid allowlist json', () => {
@@ -134,18 +142,18 @@ describe('routes_oauth local account resolution', () => {
         const user = { id: 7, username: 'admin' };
         const app = {
             userDb: {
-                getUserByName: jest.fn().mockResolvedValue(user),
+                getUser: jest.fn().mockResolvedValue(user),
             },
         };
 
         await expect(__testHooks.loadMappedUser(app, 'admin')).resolves.toBe(user);
-        expect(app.userDb.getUserByName).toHaveBeenCalledWith('admin');
+        expect(app.userDb.getUser).toHaveBeenCalledWith('admin');
     });
 
     test('loadMappedUser rejects missing local user', async () => {
         const app = {
             userDb: {
-                getUserByName: jest.fn().mockResolvedValue(null),
+                getUser: jest.fn().mockResolvedValue(null),
             },
         };
 

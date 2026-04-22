@@ -3,12 +3,31 @@ const http = require('http');
 const https = require('https');
 const { URL, URLSearchParams } = require('url');
 const createLogger = require('../../libs/logger');
-const Helpers = require('../../libs/helpers');
 const l = createLogger('webchat-oauth');
 
+function parseAllowlist(raw) {
+    if (!raw) {
+        return {};
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        throw new Error('Invalid RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON');
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON must decode to an object');
+    }
+
+    return parsed;
+}
+
 function buildOauthConfig(app) {
-    // Prefer explicit env vars; fall back to webchat config entries
-    const webchat = app.conf.get('webchat') || {};
+    const webchat = app && app.conf && typeof app.conf.get === 'function'
+        ? (app.conf.get('webchat') || {})
+        : {};
     const conf = (envKey, webKey, def = '') => {
         return process.env[envKey] || webchat[webKey] || def;
     };
@@ -20,6 +39,7 @@ function buildOauthConfig(app) {
     const redirectUri = conf('KIWIBNC_OAUTH_REDIRECT_URI', 'oauth_redirect_uri');
     const userInfoUrl = conf('KIWIBNC_OAUTH_USERINFO_URL', 'oauth_userinfo_url');
     const scope = conf('KIWIBNC_OAUTH_SCOPE', 'oauth_scope', 'openid profile email');
+    const allowlist = parseAllowlist(process.env.RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON);
 
     l.info('OAuth config values', {
         clientId: !!clientId,
@@ -43,8 +63,9 @@ function buildOauthConfig(app) {
         redirectUri,
         userInfoUrl,
         scope,
-        provider: 'WordPress',
-        allowRegistration: app.conf.get('webchat.public_register', false),
+        provider: 'RelayOS',
+        allowRegistration: false,
+        allowlist,
     };
 }
 
@@ -130,45 +151,6 @@ async function fetchUserInfo(oauthConf, token) {
     });
 }
 
-function decodeIdToken(idToken) {
-    if (!idToken || typeof idToken !== 'string') {
-        return null;
-    }
-    const parts = idToken.split('.');
-    if (parts.length < 2) {
-        return null;
-    }
-    try {
-        const payload = Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-        return JSON.parse(payload);
-    } catch (err) {
-        return null;
-    }
-}
-
-function pickUsername(source) {
-    const candidates = [
-        source.username,
-        source.user_login,
-        source.user_nicename,
-        source.preferred_username,
-        source.login,
-        source.email && source.email.split('@')[0],
-        source.name,
-    ].filter(Boolean);
-
-    return candidates[0] || '';
-}
-
-function sanitizeUsername(rawName) {
-    let username = (rawName || '').trim();
-    username = username.replace(/[^0-9a-zA-Z_-]/g, '');
-    if (/^[0-9-]/.test(username)) {
-        username = `u_${username}`;
-    }
-    return username;
-}
-
 function setStateCookie(ctx, value) {
     ctx.cookies.set('kiwibnc_oauth_state', value, {
         httpOnly: true,
@@ -205,6 +187,33 @@ function respondError(ctx, message) {
     ctx.status = 400;
     ctx.type = 'text/html';
     ctx.body = `<!doctype html><html><body><p>${message}</p><a href="/">Back</a></body></html>`;
+}
+
+function resolveAllowedUser(oauthConf, userInfo) {
+    const remoteLogin = userInfo && userInfo.user_login;
+    if (!remoteLogin) {
+        throw new Error('OAuth userinfo missing user_login');
+    }
+
+    const allowlist = (oauthConf && oauthConf.allowlist) || {};
+    const localUsername = allowlist[remoteLogin];
+    if (!localUsername) {
+        throw new Error('OAuth account is not approved');
+    }
+
+    return {
+        remoteLogin,
+        localUsername,
+    };
+}
+
+async function loadMappedUser(app, localUsername) {
+    const user = await app.userDb.getUser(localUsername);
+    if (!user) {
+        throw new Error('Mapped KiwiBNC user does not exist');
+    }
+
+    return user;
 }
 
 function registerRoutes(app) {
@@ -270,13 +279,6 @@ function registerRoutes(app) {
             l.warn('OAuth userinfo fetch failed:', err.message);
         }
 
-        if ((!userInfo || Object.keys(userInfo).length === 0) && tokenResp.id_token) {
-            const decoded = decodeIdToken(tokenResp.id_token);
-            if (decoded) {
-                userInfo = Object.assign({}, userInfo, decoded);
-            }
-        }
-
         const infoKeys = Object.keys(userInfo || {}).filter(k => k !== 'id_token' && k !== 'access_token' && k !== 'refresh_token');
         l.info('OAuth userinfo received', {
             keys: infoKeys,
@@ -287,38 +289,27 @@ function registerRoutes(app) {
             },
         });
 
-        let username = sanitizeUsername(pickUsername(userInfo));
-        if (!username || !Helpers.validUsername(username)) {
-            return respondError(ctx, 'Unable to derive a valid username from OAuth provider.');
-        }
-
-        let user = await app.userDb.getUser(username);
-        if (!user) {
-            if (!oauthConf.allowRegistration) {
-                return respondError(ctx, 'Account does not exist. Please contact an admin.');
-            }
-
-            const randomPass = crypto.randomBytes(12).toString('hex');
-            try {
-                user = await app.userDb.addUser(username, randomPass, false);
-                l.info('OAuth created user', { username });
-            } catch (err) {
-                l.error('OAuth user creation failed:', err.message);
-                return respondError(ctx, 'Failed to create account.');
-            }
+        let mappedUser;
+        let resolvedUser;
+        try {
+            resolvedUser = resolveAllowedUser(oauthConf, userInfo);
+            mappedUser = await loadMappedUser(app, resolvedUser.localUsername);
+        } catch (err) {
+            l.warn('OAuth allowlist rejected login:', err.message);
+            return respondError(ctx, err.message);
         }
 
         let token;
         try {
-            token = await app.userDb.generateUserToken(user.id, 7 * 24 * 3600, 'oauth-login', ctx.ip);
-            l.info('OAuth issued token for user', { username: user.username });
+            token = await app.userDb.generateUserToken(mappedUser.id, 7 * 24 * 3600, 'oauth-login', ctx.ip);
+            l.info('OAuth issued token for user', { username: mappedUser.username });
         } catch (err) {
             l.error('OAuth token generation failed:', err.message);
             return respondError(ctx, 'Failed to generate login token.');
         }
 
         ctx.type = 'text/html';
-        ctx.body = renderTokenPage(username, token, 7 * 24 * 3600);
+        ctx.body = renderTokenPage(mappedUser.username, token, 7 * 24 * 3600);
     });
 
     return oauthConf;
@@ -339,5 +330,9 @@ module.exports = {
     registerRoutes,
     getClientConfig,
     buildOauthConfig,
-    __testHooks: {},
+    __testHooks: {
+        parseAllowlist,
+        resolveAllowedUser,
+        loadMappedUser,
+    },
 };
