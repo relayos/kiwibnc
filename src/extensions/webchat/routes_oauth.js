@@ -2,7 +2,9 @@ const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const { URL, URLSearchParams } = require('url');
+const createLogger = require('../../libs/logger');
 const Helpers = require('../../libs/helpers');
+const l = createLogger('webchat-oauth');
 
 function buildOauthConfig(app) {
     // Prefer explicit env vars; fall back to webchat config entries
@@ -336,4 +338,6 @@ function getClientConfig(oauthConf) {
 module.exports = {
     registerRoutes,
     getClientConfig,
+    buildOauthConfig,
+    __testHooks: {},
 };

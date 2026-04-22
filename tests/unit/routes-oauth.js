@@ -1,26 +1,44 @@
 'use strict';
 
-jest.mock('nconf', () => ({ get: jest.fn() }), { virtual: true });
 jest.mock('../../src/libs/logger', () => () => ({
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
 }));
 
-const nconf = require('nconf');
-
 const {
     __testHooks,
     buildOauthConfig,
 } = require('../../src/extensions/webchat/routes_oauth');
 
+const OAUTH_ENV_KEYS = [
+    'KIWIBNC_OAUTH_CLIENT_ID',
+    'KIWIBNC_OAUTH_CLIENT_SECRET',
+    'KIWIBNC_OAUTH_AUTH_URL',
+    'KIWIBNC_OAUTH_TOKEN_URL',
+    'KIWIBNC_OAUTH_REDIRECT_URI',
+    'KIWIBNC_OAUTH_USERINFO_URL',
+    'KIWIBNC_OAUTH_SCOPE',
+    'RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON',
+];
+
+function setOauthEnv(values) {
+    for (const key of OAUTH_ENV_KEYS) {
+        delete process.env[key];
+    }
+    Object.assign(process.env, values);
+}
+
 describe('routes_oauth allowlist config', () => {
     beforeEach(() => {
         jest.resetAllMocks();
+        for (const key of OAUTH_ENV_KEYS) {
+            delete process.env[key];
+        }
     });
 
     test('buildOauthConfig includes parsed allowlist when oauth env is complete', () => {
-        const values = {
+        setOauthEnv({
             KIWIBNC_OAUTH_CLIENT_ID: 'client-id',
             KIWIBNC_OAUTH_CLIENT_SECRET: 'client-secret',
             KIWIBNC_OAUTH_AUTH_URL: 'https://users.s.getrelayos.com/oauth/authorize',
@@ -29,44 +47,51 @@ describe('routes_oauth allowlist config', () => {
             KIWIBNC_OAUTH_USERINFO_URL: 'https://users.s.getrelayos.com/oauth/me',
             KIWIBNC_OAUTH_SCOPE: 'openid',
             RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON: '{"allenday":"admin"}',
-        };
-        nconf.get.mockImplementation((key) => values[key]);
+        });
 
         const conf = buildOauthConfig({
-            config: { get: jest.fn() },
+            conf: {
+                get: jest.fn((key, def) => (key === 'webchat' ? {} : def)),
+            },
         });
 
         expect(conf.allowlist).toEqual({ allenday: 'admin' });
     });
 
     test('buildOauthConfig rejects invalid allowlist json', () => {
-        const values = {
+        setOauthEnv({
             KIWIBNC_OAUTH_CLIENT_ID: 'client-id',
             KIWIBNC_OAUTH_CLIENT_SECRET: 'client-secret',
             KIWIBNC_OAUTH_AUTH_URL: 'https://users.s.getrelayos.com/oauth/authorize',
             KIWIBNC_OAUTH_TOKEN_URL: 'https://users.s.getrelayos.com/oauth/token',
             KIWIBNC_OAUTH_REDIRECT_URI: 'https://bnc.s.getrelayos.com/oauth/callback',
             RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON: '{bad-json',
-        };
-        nconf.get.mockImplementation((key) => values[key]);
+        });
 
-        expect(() => buildOauthConfig({ config: { get: jest.fn() } })).toThrow(
+        expect(() => buildOauthConfig({
+            conf: {
+                get: jest.fn((key, def) => (key === 'webchat' ? {} : def)),
+            },
+        })).toThrow(
             'Invalid RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON'
         );
     });
 
     test('buildOauthConfig rejects non-object allowlist json', () => {
-        const values = {
+        setOauthEnv({
             KIWIBNC_OAUTH_CLIENT_ID: 'client-id',
             KIWIBNC_OAUTH_CLIENT_SECRET: 'client-secret',
             KIWIBNC_OAUTH_AUTH_URL: 'https://users.s.getrelayos.com/oauth/authorize',
             KIWIBNC_OAUTH_TOKEN_URL: 'https://users.s.getrelayos.com/oauth/token',
             KIWIBNC_OAUTH_REDIRECT_URI: 'https://bnc.s.getrelayos.com/oauth/callback',
             RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON: '[]',
-        };
-        nconf.get.mockImplementation((key) => values[key]);
+        });
 
-        expect(() => buildOauthConfig({ config: { get: jest.fn() } })).toThrow(
+        expect(() => buildOauthConfig({
+            conf: {
+                get: jest.fn((key, def) => (key === 'webchat' ? {} : def)),
+            },
+        })).toThrow(
             'RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON must decode to an object'
         );
     });
