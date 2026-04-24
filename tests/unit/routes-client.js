@@ -133,4 +133,44 @@ describe('routes_client config route', () => {
             direct: true,
         });
     });
+
+    test('prefers forwarded proto and port when behind a reverse proxy', async () => {
+        fs.readFile.mockResolvedValue(JSON.stringify({
+            startupOptions: {
+                greetingText: 'KiwiBNC Login',
+                server: '{{hostname}}',
+                port: '{{port}}',
+                tls: '{{tls}}',
+                direct_path: '{{direct_path}}',
+            },
+            plugins: [],
+        }));
+
+        const app = makeApp();
+        routesClient(app, { login_url: '/oauth/login', provider: 'RelayOS' });
+        const route = app.webserver.router.routes['kiwi.config'];
+
+        const ctx = {
+            basePath: '/',
+            hostname: 'kiwibnc',
+            host: 'kiwibnc:80',
+            protocol: 'http',
+            headers: {
+                'x-forwarded-host': 'bnc.s.getrelayos.com',
+                'x-forwarded-proto': 'https',
+                'x-forwarded-port': '443',
+            },
+            request: {},
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body.startupOptions).toMatchObject({
+            server: 'bnc.s.getrelayos.com',
+            port: 443,
+            tls: true,
+            direct_path: '/',
+            direct: true,
+        });
+    });
 });

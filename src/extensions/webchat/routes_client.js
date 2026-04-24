@@ -18,13 +18,19 @@ function resolveStartupValue(existing, fallback) {
 }
 
 function buildStartupOptions(ctx) {
-    const host = ctx.host || ctx.hostname || '';
-    const isTls = (ctx.protocol || '').toLowerCase() === 'https';
+    const forwardedProto = ctx.headers && ctx.headers['x-forwarded-proto'];
+    const forwardedHost = ctx.headers && ctx.headers['x-forwarded-host'];
+    const forwardedPort = ctx.headers && ctx.headers['x-forwarded-port'];
+    const host = forwardedHost || ctx.host || ctx.hostname || '';
+    const proto = forwardedProto || ctx.protocol || '';
+    const isTls = proto.toLowerCase() === 'https';
     const portMatch = host.match(/:(\d+)$/);
-    const port = portMatch ? parseInt(portMatch[1], 10) : NaN;
+    const port = forwardedPort ?
+        parseInt(String(forwardedPort).split(',')[0].trim(), 10) :
+        (portMatch ? parseInt(portMatch[1], 10) : NaN);
 
     return {
-        server: ctx.hostname || host.replace(/:\d+$/, '') || '',
+        server: host.replace(/:\d+$/, '') || ctx.hostname || '',
         port: Number.isFinite(port) && port > 0 ? port : (isTls ? 443 : 80),
         tls: isTls,
         direct_path: ctx.basePath || '/',
