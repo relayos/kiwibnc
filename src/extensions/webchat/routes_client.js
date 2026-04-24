@@ -22,8 +22,11 @@ function buildStartupOptions(ctx) {
     const forwardedHost = ctx.headers && ctx.headers['x-forwarded-host'];
     const forwardedPort = ctx.headers && ctx.headers['x-forwarded-port'];
     const host = forwardedHost || ctx.host || ctx.hostname || '';
-    const proto = String(forwardedProto || ctx.protocol || '').split(',')[0].trim();
-    const isTls = proto.toLowerCase() === 'https';
+    const protoValues = String(forwardedProto || ctx.protocol || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+    const isTls = protoValues.includes('https');
     const portMatch = host.match(/:(\d+)$/);
     const port = forwardedPort ?
         parseInt(String(forwardedPort).split(',')[0].trim(), 10) :

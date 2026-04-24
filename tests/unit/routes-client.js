@@ -209,4 +209,40 @@ describe('routes_client config route', () => {
             tls: true,
         });
     });
+
+    test('treats any forwarded proto chain containing https as tls', async () => {
+        fs.readFile.mockResolvedValue(JSON.stringify({
+            startupOptions: {
+                greetingText: 'KiwiBNC Login',
+                server: '{{hostname}}',
+                port: '{{port}}',
+                tls: '{{tls}}',
+                direct_path: '{{direct_path}}',
+            },
+            plugins: [],
+        }));
+
+        const app = makeApp();
+        routesClient(app, { login_url: '/oauth/login', provider: 'RelayOS' });
+        const route = app.webserver.router.routes['kiwi.config'];
+
+        const ctx = {
+            basePath: '/',
+            hostname: 'kiwibnc',
+            host: 'bnc.s.getrelayos.com',
+            protocol: 'http',
+            headers: {
+                'x-forwarded-proto': 'http, https',
+            },
+            request: {},
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body.startupOptions).toMatchObject({
+            server: 'bnc.s.getrelayos.com',
+            port: 443,
+            tls: true,
+        });
+    });
 });
