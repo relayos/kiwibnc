@@ -46,6 +46,10 @@ function makeApp() {
 describe('routes_client config route', () => {
     beforeEach(() => {
         jest.resetAllMocks();
+        delete process.env.KIWIBNC_PUBLIC_HOST;
+        delete process.env.KIWIBNC_PUBLIC_PORT;
+        delete process.env.KIWIBNC_PUBLIC_TLS;
+        delete process.env.KIWIBNC_PUBLIC_PATH;
     });
 
     test('fills startupOptions from the current request instead of template placeholders', async () => {
@@ -243,6 +247,48 @@ describe('routes_client config route', () => {
             server: 'bnc.s.getrelayos.com',
             port: 443,
             tls: true,
+        });
+    });
+
+    test('prefers explicit public startup env overrides over request headers', async () => {
+        process.env.KIWIBNC_PUBLIC_HOST = 'bnc.s.getrelayos.com';
+        process.env.KIWIBNC_PUBLIC_PORT = '443';
+        process.env.KIWIBNC_PUBLIC_TLS = 'true';
+        process.env.KIWIBNC_PUBLIC_PATH = '/';
+
+        fs.readFile.mockResolvedValue(JSON.stringify({
+            startupOptions: {
+                greetingText: 'KiwiBNC Login',
+                server: '{{hostname}}',
+                port: '{{port}}',
+                tls: '{{tls}}',
+                direct_path: '{{direct_path}}',
+            },
+            plugins: [],
+        }));
+
+        const app = makeApp();
+        routesClient(app, { login_url: '/oauth/login', provider: 'RelayOS' });
+        const route = app.webserver.router.routes['kiwi.config'];
+
+        const ctx = {
+            basePath: '/',
+            hostname: 'kiwibnc',
+            host: 'kiwibnc:80',
+            protocol: 'http',
+            headers: {
+                'x-forwarded-proto': 'http',
+            },
+            request: {},
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body.startupOptions).toMatchObject({
+            server: 'bnc.s.getrelayos.com',
+            port: 443,
+            tls: true,
+            direct_path: '/',
         });
     });
 });

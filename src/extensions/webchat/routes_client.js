@@ -17,7 +17,46 @@ function resolveStartupValue(existing, fallback) {
     return existing;
 }
 
+function parsePublicTls(raw) {
+    if (raw === undefined || raw === null || raw === '') {
+        return null;
+    }
+
+    const value = String(raw).trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(value)) {
+        return true;
+    }
+    if (['0', 'false', 'no', 'off'].includes(value)) {
+        return false;
+    }
+
+    return null;
+}
+
+function buildPublicStartupOverrides() {
+    const host = process.env.KIWIBNC_PUBLIC_HOST || '';
+    const port = parseInt(process.env.KIWIBNC_PUBLIC_PORT || '', 10);
+    const tls = parsePublicTls(process.env.KIWIBNC_PUBLIC_TLS);
+    const directPath = process.env.KIWIBNC_PUBLIC_PATH || '';
+
+    if (!host && !Number.isFinite(port) && tls === null && !directPath) {
+        return null;
+    }
+
+    return {
+        server: host || '',
+        port: Number.isFinite(port) && port > 0 ? port : (tls ? 443 : 80),
+        tls: tls === null ? false : tls,
+        direct_path: directPath || '/',
+    };
+}
+
 function buildStartupOptions(ctx) {
+    const publicOverrides = buildPublicStartupOverrides();
+    if (publicOverrides) {
+        return publicOverrides;
+    }
+
     const forwardedProto = ctx.headers && ctx.headers['x-forwarded-proto'];
     const forwardedHost = ctx.headers && ctx.headers['x-forwarded-host'];
     const forwardedPort = ctx.headers && ctx.headers['x-forwarded-port'];
