@@ -14,7 +14,7 @@ steps:
     image: node:20-alpine
     commands:
       - npm ci
-      - ./node_modules/.bin/jest tests/unit/docker-entrypoint.js tests/unit/seed-admin.js tests/unit/routes-oauth.js --runInBand
+      - ./node_modules/.bin/jest tests/unit/docker-entrypoint.js tests/unit/seed-admin.js tests/unit/routes-client.js tests/unit/routes-oauth.js --runInBand
 
   - name: test-build
     image: woodpeckerci/plugin-docker-buildx
@@ -39,7 +39,7 @@ steps:
       context: .
       tags:
         - latest
-        - ${CI_COMMIT_SHA:0:7}
+        - sha-${CI_COMMIT_SHA:0:7}
       username:
         from_secret: ghcr_username
       password:
