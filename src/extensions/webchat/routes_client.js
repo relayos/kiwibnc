@@ -1,6 +1,19 @@
 const fs = require('fs-extra');
 const path = require('path');
-const { parseBindString } = require('../../libs/helpers');
+
+function buildStartupOptions(ctx) {
+    const host = ctx.host || ctx.hostname || '';
+    const isTls = (ctx.protocol || '').toLowerCase() === 'https';
+    const portMatch = host.match(/:(\d+)$/);
+    const port = portMatch ? parseInt(portMatch[1], 10) : NaN;
+
+    return {
+        server: ctx.hostname || host.replace(/:\d+$/, '') || '',
+        port: Number.isFinite(port) && port > 0 ? port : (isTls ? 443 : 80),
+        tls: isTls,
+        direct_path: ctx.basePath || '/',
+    };
+}
 
 module.exports = function(app, oauthClientConf) {
     let router = app.webserver.router;
@@ -26,10 +39,7 @@ module.exports = function(app, oauthClientConf) {
 
         config.startupOptions = {
             ...config.startupOptions,
-            port: '{{port}}',
-            server: '{{hostname}}',
-            direct_path: '/',
-            tls: '{{tls}}',
+            ...buildStartupOptions(ctx),
             direct: true,
             channel: '',
             bouncer: true,
