@@ -1,6 +1,22 @@
 const fs = require('fs-extra');
 const path = require('path');
 
+function isTemplatePlaceholder(value) {
+    return typeof value === 'string' && /^\{\{[^}]+\}\}$/.test(value.trim());
+}
+
+function resolveStartupValue(existing, fallback) {
+    if (existing === undefined || existing === null || existing === '') {
+        return fallback;
+    }
+
+    if (isTemplatePlaceholder(existing)) {
+        return fallback;
+    }
+
+    return existing;
+}
+
 function buildStartupOptions(ctx) {
     const host = ctx.host || ctx.hostname || '';
     const isTls = (ctx.protocol || '').toLowerCase() === 'https';
@@ -37,9 +53,16 @@ module.exports = function(app, oauthClientConf) {
             startupScreen: 'kiwibnc',
         };
 
+        const requestStartupOptions = buildStartupOptions(ctx);
         config.startupOptions = {
             ...config.startupOptions,
-            ...buildStartupOptions(ctx),
+            server: resolveStartupValue(config.startupOptions.server, requestStartupOptions.server),
+            port: resolveStartupValue(config.startupOptions.port, requestStartupOptions.port),
+            tls: resolveStartupValue(config.startupOptions.tls, requestStartupOptions.tls),
+            direct_path: resolveStartupValue(
+                config.startupOptions.direct_path,
+                requestStartupOptions.direct_path
+            ),
             direct: true,
             channel: '',
             bouncer: true,

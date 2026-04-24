@@ -98,4 +98,39 @@ describe('routes_client config route', () => {
             provider: 'RelayOS',
         });
     });
+
+    test('preserves explicit startup listener settings from config', async () => {
+        fs.readFile.mockResolvedValue(JSON.stringify({
+            startupOptions: {
+                greetingText: 'KiwiBNC Login',
+                server: 'irc.example.net',
+                port: 6697,
+                tls: true,
+                direct_path: '/socket',
+            },
+            plugins: [],
+        }));
+
+        const app = makeApp();
+        routesClient(app, { login_url: '/oauth/login', provider: 'RelayOS' });
+        const route = app.webserver.router.routes['kiwi.config'];
+
+        const ctx = {
+            basePath: '/bnc',
+            hostname: 'users.s.getrelayos.com',
+            host: 'users.s.getrelayos.com:8443',
+            protocol: 'https',
+            request: {},
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body.startupOptions).toMatchObject({
+            server: 'irc.example.net',
+            port: 6697,
+            tls: true,
+            direct_path: '/socket',
+            direct: true,
+        });
+    });
 });
