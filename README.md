@@ -29,6 +29,26 @@ $ cd kiwibnc
 $ npm install
 ```
 
+## RelayOS
+
+This fork is the canonical RelayOS KiwiBNC source and image build.
+
+- default branch: `master`
+- image: `ghcr.io/relayos/kiwibnc`
+- CI publishes `latest` and `sha-<shortsha>` tags from pushes to `master`
+- the container expects persistent state in `/data`
+
+### Container runtime
+
+The RelayOS image uses the in-repo [Dockerfile](./Dockerfile) and [docker-entrypoint.sh](./docker-entrypoint.sh).
+
+- `HOME=/data`
+- `KIWIBNC_DATA_DIR=/data`
+- first boot bootstraps the persisted KiwiBNC home/config if it is missing
+- startup can seed the RelayOS admin account and apply RelayOS-specific OAuth and public webchat config
+
+For deploys, downstream stack config should treat `ghcr.io/relayos/kiwibnc` as the canonical image source and mount `/data` persistently.
+
 ## Usage
 Running KiwiBNC for the first time will auto generate a config file in your home directory. You can also create your own using [this](https://github.com/kiwiirc/kiwibnc/blob/master/src/configProfileTemplate/config.ini) as a template and passing `--config=/path/to/config.ini` when running.
 

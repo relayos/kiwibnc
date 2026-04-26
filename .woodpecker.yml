@@ -1,6 +1,6 @@
 when:
   - event: [push, pull_request]
-    branch: [relayos]
+    branch: [master]
 
 clone:
   git:
@@ -31,7 +31,7 @@ steps:
     image: woodpeckerci/plugin-docker-buildx
     when:
       event: [push]
-      branch: [relayos]
+      branch: [master]
     settings:
       registry: ghcr.io
       repo: ghcr.io/relayos/kiwibnc
