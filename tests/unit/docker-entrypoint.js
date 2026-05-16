@@ -32,100 +32,6 @@ describe('docker-entrypoint', () => {
     expect(result.status).toBe(0);
   });
 
-  test('starts the admin seed helper once when seed JSON is present', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
-    const binDir = path.join(tmpDir, 'bin');
-    const markerFile = path.join(tmpDir, 'seed-helper-args.json');
-
-    fs.mkdirSync(binDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(binDir, 'node'),
-      [
-        '#!/bin/sh',
-        'printf "%s\\n" "$@" > "$NODE_ARGS_FILE"',
-        'exit 0',
-        '',
-      ].join('\n'),
-      { mode: 0o755 }
-    );
-
-    const result = spawnSync(
-      '/bin/sh',
-      [
-        'docker-entrypoint.sh',
-        '/bin/sh',
-        '-c',
-        'test "$HOME" = "$KIWIBNC_DATA_DIR"',
-      ],
-      {
-        cwd: path.resolve(__dirname, '..', '..'),
-        env: {
-          ...process.env,
-          PATH: `${binDir}:${process.env.PATH}`,
-          KIWIBNC_DATA_DIR: path.join(tmpDir, 'data'),
-          NODE_ARGS_FILE: markerFile,
-          RELAYOS_KIWIBNC_ADMIN_JSON: JSON.stringify({
-            username: 'admin',
-            password: 'secret',
-            network_name: 'KiwiNet',
-            irc_host: 'irc.example.org',
-            irc_port: '6697',
-            irc_tls: 'true',
-          }),
-        },
-      }
-    );
-
-    expect(result.status).toBe(0);
-    expect(fs.readFileSync(markerFile, 'utf8').trim().split('\n')).toEqual([
-      '/app/scripts/seed-admin.js',
-    ]);
-  });
-
-  test('fails startup when seeded-admin mode is enabled and the helper fails', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
-    const binDir = path.join(tmpDir, 'bin');
-
-    fs.mkdirSync(binDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(binDir, 'node'),
-      [
-        '#!/bin/sh',
-        'exit 1',
-        '',
-      ].join('\n'),
-      { mode: 0o755 }
-    );
-
-    const result = spawnSync(
-      '/bin/sh',
-      [
-        'docker-entrypoint.sh',
-        '/bin/sh',
-        '-c',
-        'sleep 10',
-      ],
-      {
-        cwd: path.resolve(__dirname, '..', '..'),
-        env: {
-          ...process.env,
-          PATH: `${binDir}:${process.env.PATH}`,
-          KIWIBNC_DATA_DIR: path.join(tmpDir, 'data'),
-          RELAYOS_KIWIBNC_ADMIN_JSON: JSON.stringify({
-            username: 'admin',
-            password: 'secret',
-            network_name: 'KiwiNet',
-            irc_host: 'irc.example.org',
-            irc_port: '6697',
-            irc_tls: 'true',
-          }),
-        },
-      }
-    );
-
-    expect(result.status).toBe(1);
-  });
-
   test('forwards termination signals to the supervised app process', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
     const binDir = path.join(tmpDir, 'bin');
@@ -157,14 +63,6 @@ describe('docker-entrypoint', () => {
           PATH: `${binDir}:${process.env.PATH}`,
           KIWIBNC_DATA_DIR: path.join(tmpDir, 'data'),
           APP_PID_FILE: appPidFile,
-          RELAYOS_KIWIBNC_ADMIN_JSON: JSON.stringify({
-            username: 'admin',
-            password: 'secret',
-            network_name: 'KiwiNet',
-            irc_host: 'irc.example.org',
-            irc_port: '6697',
-            irc_tls: 'true',
-          }),
         },
         stdio: 'ignore',
       }

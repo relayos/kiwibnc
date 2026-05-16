@@ -17,12 +17,4 @@ forward_signal() {
 
 trap forward_signal TERM INT HUP
 
-if [ -n "${RELAYOS_KIWIBNC_ADMIN_JSON:-}" ]; then
-  if ! node /app/scripts/seed-admin.js; then
-    kill "${app_pid}" 2>/dev/null || true
-    wait "${app_pid}" 2>/dev/null || true
-    exit 1
-  fi
-fi
-
 wait "${app_pid}"

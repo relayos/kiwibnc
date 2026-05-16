@@ -3,37 +3,33 @@ const http = require('http');
 const https = require('https');
 const { URL, URLSearchParams } = require('url');
 const createLogger = require('../../libs/logger');
+const Helpers = require('../../libs/helpers');
 const l = createLogger('webchat-oauth');
 
-function parseAllowlist(raw) {
-    if (!raw) {
-        return {};
+function parseBool(value, def) {
+    if (typeof value === 'undefined' || value === null || value === '') {
+        return def;
     }
-
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    } catch (err) {
-        throw new Error('Invalid RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON');
-    }
-
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON must decode to an object');
-    }
-
-    const allowlist = {};
-    for (const [remoteLogin, localUsername] of Object.entries(parsed)) {
-        if (typeof localUsername !== 'string' || !localUsername.trim()) {
-            throw new Error('RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON values must be non-empty strings');
-        }
-        allowlist[remoteLogin] = localUsername;
-    }
-
-    return allowlist;
+    return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
-function hasAllowlistMappings(allowlist) {
-    return !!allowlist && Object.keys(allowlist).length > 0;
+function parsePort(value, def) {
+    const port = Number(value);
+    return Number.isInteger(port) && port > 0 ? port : def;
+}
+
+function buildDefaultNetwork(webchat) {
+    const conf = (envKey, webKey, def) => {
+        return process.env[envKey] || webchat[webKey] || def;
+    };
+
+    return {
+        name: conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_NAME', 'oauth_default_network_name', 'RelayOS'),
+        host: conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_HOST', 'oauth_default_network_host', 'inspircd'),
+        port: parsePort(conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_PORT', 'oauth_default_network_port', '6667'), 6667),
+        tls: parseBool(conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_TLS', 'oauth_default_network_tls', 'false'), false),
+        channels: conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_CHANNELS', 'oauth_default_network_channels', ''),
+    };
 }
 
 function buildOauthConfig(app) {
@@ -51,7 +47,6 @@ function buildOauthConfig(app) {
     const redirectUri = conf('KIWIBNC_OAUTH_REDIRECT_URI', 'oauth_redirect_uri');
     const userInfoUrl = conf('KIWIBNC_OAUTH_USERINFO_URL', 'oauth_userinfo_url');
     const scope = conf('KIWIBNC_OAUTH_SCOPE', 'oauth_scope', 'openid profile email');
-    const allowlist = parseAllowlist(process.env.RELAYOS_KIWIBNC_OAUTH_ALLOWLIST_JSON);
 
     l.info('OAuth config values', {
         clientId: !!clientId,
@@ -67,11 +62,6 @@ function buildOauthConfig(app) {
         return null;
     }
 
-    if (!hasAllowlistMappings(allowlist)) {
-        l.warn('OAuth allowlist missing or empty; skipping OAuth routes');
-        return null;
-    }
-
     return {
         clientId,
         clientSecret,
@@ -81,8 +71,8 @@ function buildOauthConfig(app) {
         userInfoUrl,
         scope,
         provider: 'RelayOS',
-        allowRegistration: false,
-        allowlist,
+        allowRegistration: true,
+        defaultNetwork: buildDefaultNetwork(webchat),
     };
 }
 
@@ -168,27 +158,6 @@ async function fetchUserInfo(oauthConf, token) {
     });
 }
 
-function decodeIdToken(idToken) {
-    if (!idToken || typeof idToken !== 'string') {
-        return null;
-    }
-
-    const parts = idToken.split('.');
-    if (parts.length < 2) {
-        return null;
-    }
-
-    try {
-        const payload = Buffer.from(
-            parts[1].replace(/-/g, '+').replace(/_/g, '/'),
-            'base64'
-        ).toString('utf8');
-        return JSON.parse(payload);
-    } catch (err) {
-        return null;
-    }
-}
-
 function setStateCookie(ctx, value) {
     ctx.cookies.set('kiwibnc_oauth_state', value, {
         httpOnly: true,
@@ -227,29 +196,56 @@ function respondError(ctx, message) {
     ctx.body = `<!doctype html><html><body><p>${message}</p><a href="/">Back</a></body></html>`;
 }
 
-function resolveAllowedUser(oauthConf, userInfo) {
-    const remoteLogin = userInfo && userInfo.user_login;
-    if (!remoteLogin) {
+function resolveWordPressIdentity(userInfo) {
+    const username = userInfo && typeof userInfo.user_login === 'string'
+        ? userInfo.user_login.trim()
+        : '';
+    if (!username) {
         throw new Error('OAuth userinfo missing user_login');
     }
 
-    const allowlist = (oauthConf && oauthConf.allowlist) || {};
-    const localUsername = allowlist[remoteLogin];
-    if (!localUsername) {
-        throw new Error('OAuth account is not approved');
+    if (!Helpers.validUsername(username)) {
+        throw new Error('OAuth user_login is not a valid BNC username');
     }
 
     return {
-        remoteLogin,
-        localUsername,
+        username,
     };
 }
 
-async function loadMappedUser(app, localUsername) {
-    const user = await app.userDb.getUser(localUsername);
-    if (!user) {
-        throw new Error('Mapped KiwiBNC user does not exist');
+function generateUnusablePassword() {
+    return `oauth-unusable-${crypto.randomBytes(32).toString('hex')}`;
+}
+
+function buildUserNetwork(defaultNetwork, username) {
+    return {
+        name: defaultNetwork.name,
+        host: defaultNetwork.host,
+        port: defaultNetwork.port,
+        tls: defaultNetwork.tls,
+        nick: username,
+        username,
+        realname: username,
+        channels: defaultNetwork.channels || '',
+    };
+}
+
+async function ensureDefaultNetwork(app, user, defaultNetwork) {
+    const existing = await app.userDb.getNetworkByName(user.id, defaultNetwork.name);
+    if (existing) {
+        return;
     }
+
+    await app.userDb.addNetwork(user.id, buildUserNetwork(defaultNetwork, user.username));
+}
+
+async function ensureOAuthUser(app, username, defaultNetwork) {
+    let user = await app.userDb.getUser(username);
+    if (!user) {
+        user = await app.userDb.addUser(username, generateUnusablePassword(), false);
+    }
+
+    await ensureDefaultNetwork(app, user, defaultNetwork);
 
     return user;
 }
@@ -317,13 +313,6 @@ function registerRoutes(app) {
             l.warn('OAuth userinfo fetch failed:', err.message);
         }
 
-        if (!userInfo.user_login && tokenResp.id_token) {
-            const decoded = decodeIdToken(tokenResp.id_token);
-            if (decoded) {
-                userInfo = Object.assign({}, userInfo, decoded);
-            }
-        }
-
         const infoKeys = Object.keys(userInfo || {}).filter(k => k !== 'id_token' && k !== 'access_token' && k !== 'refresh_token');
         l.info('OAuth userinfo received', {
             keys: infoKeys,
@@ -335,12 +324,11 @@ function registerRoutes(app) {
         });
 
         let mappedUser;
-        let resolvedUser;
         try {
-            resolvedUser = resolveAllowedUser(oauthConf, userInfo);
-            mappedUser = await loadMappedUser(app, resolvedUser.localUsername);
+            const identity = resolveWordPressIdentity(userInfo);
+            mappedUser = await ensureOAuthUser(app, identity.username, oauthConf.defaultNetwork);
         } catch (err) {
-            l.warn('OAuth allowlist rejected login:', err.message);
+            l.warn('OAuth rejected login:', err.message);
             return respondError(ctx, err.message);
         }
 
@@ -361,7 +349,7 @@ function registerRoutes(app) {
 }
 
 function getClientConfig(oauthConf) {
-    if (!oauthConf || !hasAllowlistMappings(oauthConf.allowlist)) {
+    if (!oauthConf) {
         return null;
     }
 
@@ -376,8 +364,8 @@ module.exports = {
     getClientConfig,
     buildOauthConfig,
     __testHooks: {
-        parseAllowlist,
-        resolveAllowedUser,
-        loadMappedUser,
+        resolveWordPressIdentity,
+        ensureOAuthUser,
+        buildDefaultNetwork,
     },
 };
