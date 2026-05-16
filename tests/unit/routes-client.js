@@ -14,25 +14,43 @@ function makeRouter() {
         get(name, path, handler) {
             routes[name] = { path, handler };
         },
-        post() {},
+        post(name, path, handler) {
+            routes[`${name}:post`] = { path, handler };
+        },
         url(name) {
             return `/mock/${name}`;
         },
     };
 }
 
-function makeApp() {
+function makeApp(overrides = {}) {
     const router = makeRouter();
+    const publicRegister = overrides.publicRegister || false;
+    const webchat = overrides.webchat || {};
+    const users = overrides.users || [];
     return {
         webserver: { router },
+        userDb: {
+            getUser: jest.fn(async (username) => users.find((user) => user.username === username) || null),
+            addUser: jest.fn(async (username, password, admin) => ({ username, admin })),
+        },
+        db: {
+            factories: {
+                User: {
+                    query: jest.fn(() => ({
+                        first: jest.fn(async () => overrides.usersExist || null),
+                    })),
+                },
+            },
+        },
         conf: {
             relativePath: jest.fn(() => '/srv/public'),
             get: jest.fn((key, def) => {
                 if (key === 'webchat') {
-                    return {};
+                    return webchat;
                 }
                 if (key === 'webchat.public_register') {
-                    return false;
+                    return publicRegister;
                 }
                 if (key === 'webserver.public_dir') {
                     return '/srv/public';
@@ -290,5 +308,147 @@ describe('routes_client config route', () => {
             tls: true,
             direct_path: '/',
         });
+    });
+
+    test('hides public registration when oauth is enabled even if persisted config allows it', async () => {
+        fs.readFile.mockResolvedValue(JSON.stringify({
+            startupOptions: {
+                server: '{{hostname}}',
+                port: '{{port}}',
+                tls: '{{tls}}',
+                direct_path: '{{direct_path}}',
+            },
+            plugins: [],
+        }));
+
+        const app = makeApp({ publicRegister: true });
+        routesClient(app, { login_url: '/oauth/login', provider: 'RelayOS' });
+        const route = app.webserver.router.routes['kiwi.config'];
+
+        const ctx = {
+            basePath: '/',
+            hostname: 'kiwibnc',
+            host: 'bnc.s.getrelayos.com',
+            protocol: 'https',
+            request: {},
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body.startupOptions.public_register).toBe(false);
+        expect(ctx.body.oauth).toEqual({
+            login_url: '/oauth/login',
+            provider: 'RelayOS',
+        });
+    });
+
+    test('protects oauth public registration setting from webchat startupOptions overrides', async () => {
+        fs.readFile.mockResolvedValue(JSON.stringify({
+            startupOptions: {
+                server: '{{hostname}}',
+                port: '{{port}}',
+                tls: '{{tls}}',
+                direct_path: '{{direct_path}}',
+            },
+            plugins: [],
+        }));
+
+        const app = makeApp({
+            publicRegister: true,
+            webchat: {
+                startupOptions: {
+                    public_register: true,
+                },
+            },
+        });
+        routesClient(app, { login_url: '/oauth/login', provider: 'RelayOS' });
+        const route = app.webserver.router.routes['kiwi.config'];
+
+        const ctx = {
+            basePath: '/',
+            hostname: 'kiwibnc',
+            host: 'bnc.s.getrelayos.com',
+            protocol: 'https',
+            request: {},
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body.startupOptions.public_register).toBe(false);
+    });
+
+    test('keeps public registration visible when oauth is disabled and config allows it', async () => {
+        fs.readFile.mockResolvedValue(JSON.stringify({
+            startupOptions: {
+                server: '{{hostname}}',
+                port: '{{port}}',
+                tls: '{{tls}}',
+                direct_path: '{{direct_path}}',
+            },
+            plugins: [],
+        }));
+
+        const app = makeApp({ publicRegister: true });
+        routesClient(app, null);
+        const route = app.webserver.router.routes['kiwi.config'];
+
+        const ctx = {
+            basePath: '/',
+            hostname: 'kiwibnc',
+            host: 'bnc.s.getrelayos.com',
+            protocol: 'https',
+            request: {},
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body.startupOptions.public_register).toBe(true);
+        expect(ctx.body.oauth).toBeUndefined();
+    });
+});
+
+describe('routes_client registration route', () => {
+    beforeEach(() => {
+        jest.resetAllMocks();
+    });
+
+    test('forbids public registration when oauth is enabled even if persisted config allows it', async () => {
+        const app = makeApp({ publicRegister: true });
+        routesClient(app, { login_url: '/oauth/login', provider: 'RelayOS' });
+        const route = app.webserver.router.routes['kiwi.config:post'];
+
+        const ctx = {
+            request: {
+                body: {
+                    username: 'newuser',
+                    password: 'secret',
+                },
+            },
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body).toEqual({ error: 'forbidden' });
+        expect(app.userDb.addUser).not.toHaveBeenCalled();
+    });
+
+    test('keeps existing public registration behavior when oauth is disabled', async () => {
+        const app = makeApp({ publicRegister: true, usersExist: { id: 1 } });
+        routesClient(app, null);
+        const route = app.webserver.router.routes['kiwi.config:post'];
+
+        const ctx = {
+            request: {
+                body: {
+                    username: 'newuser',
+                    password: 'secret',
+                },
+            },
+        };
+
+        await route.handler(ctx, jest.fn());
+
+        expect(ctx.body).toEqual({ error: false });
+        expect(app.userDb.addUser).toHaveBeenCalledWith('newuser', 'secret', false);
     });
 });

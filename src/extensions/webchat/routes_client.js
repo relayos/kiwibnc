@@ -83,6 +83,7 @@ module.exports = function(app, oauthClientConf) {
     let router = app.webserver.router;
 
     let publicPath = app.conf.relativePath(app.conf.get('webserver.public_dir'));
+    const oauthEnabled = !!(oauthClientConf && oauthClientConf.login_url);
 
     router.get('kiwi.bnc_plugin', '/kiwibnc_plugin.html', async (ctx, next) => {
         ctx.body = await fs.readFile(
@@ -115,7 +116,7 @@ module.exports = function(app, oauthClientConf) {
             channel: '',
             bouncer: true,
             remember_buffers: false,
-            public_register : app.conf.get('webchat.public_register', false),
+            public_register : oauthEnabled ? false : app.conf.get('webchat.public_register', false),
         };
 
         // Add our kiwi plugin to the config
@@ -135,11 +136,19 @@ module.exports = function(app, oauthClientConf) {
             config[prop] = extraConf[prop];
         }
 
+        config.startupOptions = config.startupOptions || {};
+        config.startupOptions.public_register = oauthEnabled ?
+            false :
+            app.conf.get('webchat.public_register', false);
+        if (oauthEnabled) {
+            config.oauth = oauthClientConf;
+        }
+
         ctx.body = config;
     });
 
     app.webserver.router.post('kiwi.config', '/api/register', async (ctx, next) => {
-        if (!app.conf.get('webchat.public_register', false)) {
+        if (oauthEnabled || !app.conf.get('webchat.public_register', false)) {
             ctx.body = {error: 'forbidden'};
             return;
         }
