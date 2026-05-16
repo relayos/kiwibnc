@@ -257,6 +257,27 @@ describe('routes_oauth local account resolution', () => {
         });
     });
 
+    test('ensureOAuthUser handles newly inserted sqlite object ids', async () => {
+        const created = { id: { id: 5230 }, username: 'relayosqa_manual' };
+        const app = {
+            userDb: {
+                getUser: jest.fn().mockResolvedValue(null),
+                addUser: jest.fn().mockResolvedValue(created),
+                getNetworkByName: jest.fn().mockResolvedValue(null),
+                addNetwork: jest.fn().mockResolvedValue({ name: 'RelayOS' }),
+            },
+        };
+
+        await expect(__testHooks.ensureOAuthUser(app, 'relayosqa_manual', defaultNetwork)).resolves.toBe(created);
+
+        expect(app.userDb.getNetworkByName).toHaveBeenCalledWith(5230, 'RelayOS');
+        expect(app.userDb.addNetwork).toHaveBeenCalledWith(5230, expect.objectContaining({
+            name: 'RelayOS',
+            nick: 'relayosqa_manual',
+            username: 'relayosqa_manual',
+        }));
+    });
+
     test('ensureOAuthUser does not seed network when default network already exists', async () => {
         const user = { id: 7, username: 'allenday' };
         const app = {

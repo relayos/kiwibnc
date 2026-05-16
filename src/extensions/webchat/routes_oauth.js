@@ -230,13 +230,22 @@ function buildUserNetwork(defaultNetwork, username) {
     };
 }
 
+function getUserId(user) {
+    if (user && user.id && typeof user.id === 'object' && Object.prototype.hasOwnProperty.call(user.id, 'id')) {
+        return user.id.id;
+    }
+
+    return user ? user.id : undefined;
+}
+
 async function ensureDefaultNetwork(app, user, defaultNetwork) {
-    const existing = await app.userDb.getNetworkByName(user.id, defaultNetwork.name);
+    const userId = getUserId(user);
+    const existing = await app.userDb.getNetworkByName(userId, defaultNetwork.name);
     if (existing) {
         return;
     }
 
-    await app.userDb.addNetwork(user.id, buildUserNetwork(defaultNetwork, user.username));
+    await app.userDb.addNetwork(userId, buildUserNetwork(defaultNetwork, user.username));
 }
 
 async function ensureOAuthUser(app, username, defaultNetwork) {
@@ -334,7 +343,7 @@ function registerRoutes(app) {
 
         let token;
         try {
-            token = await app.userDb.generateUserToken(mappedUser.id, 7 * 24 * 3600, 'oauth-login', ctx.ip);
+            token = await app.userDb.generateUserToken(getUserId(mappedUser), 7 * 24 * 3600, 'oauth-login', ctx.ip);
             l.info('OAuth issued token for user', { username: mappedUser.username });
         } catch (err) {
             l.error('OAuth token generation failed:', err.message);

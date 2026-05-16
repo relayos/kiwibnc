@@ -58,7 +58,7 @@ class DatabaseSavable {
         if (!this.getData('id')) {
             let id = await this._db.dbUsers(this._table).insert(cols).returning('id');
             // knexjs returns the inserted ID within an array
-            id = id[0];
+            id = DatabaseSavable.normalizeInsertedId(id);
             if (id) {
                 this._data.id = { col: 'id', val: id, dirty: false };
             }
@@ -106,6 +106,18 @@ class DatabaseSavable {
         };
 
         return factory;
+    }
+
+    static normalizeInsertedId(id) {
+        if (Array.isArray(id)) {
+            return DatabaseSavable.normalizeInsertedId(id[0]);
+        }
+
+        if (id && typeof id === 'object' && Object.prototype.hasOwnProperty.call(id, 'id')) {
+            return id.id;
+        }
+
+        return id;
     }
 
 }

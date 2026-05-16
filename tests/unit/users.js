@@ -5,6 +5,7 @@ jest.mock('bcrypt', () => ({
 }));
 
 const Users = require('../../src/worker/users');
+const DatabaseSavable = require('../../src/libs/dataModels/databasesavable');
 
 describe('worker users', () => {
     let originalConfig;
@@ -47,5 +48,13 @@ describe('worker users', () => {
         expect(network.channels).toBe('#lobby,#help');
         expect(saved).toHaveLength(1);
         expect(saved[0].channels).toBe('#lobby,#help');
+    });
+});
+
+describe('database savable models', () => {
+    test('normalizes inserted ids returned by sqlite and other knex clients', () => {
+        expect(DatabaseSavable.normalizeInsertedId([{ id: 5230 }])).toBe(5230);
+        expect(DatabaseSavable.normalizeInsertedId([5230])).toBe(5230);
+        expect(DatabaseSavable.normalizeInsertedId(5230)).toBe(5230);
     });
 });
