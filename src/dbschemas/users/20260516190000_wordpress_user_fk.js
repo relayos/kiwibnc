@@ -2,7 +2,7 @@ exports.up = async function(knex) {
     const hasColumn = await knex.schema.hasColumn('users', 'wp_user_id');
     if (!hasColumn) {
         await knex.schema.table('users', function (table) {
-            table.integer('wp_user_id').unsigned().nullable().index();
+            table.bigInteger('wp_user_id').unsigned().nullable().index();
         });
     }
 
@@ -11,6 +11,7 @@ exports.up = async function(knex) {
     }
 
     const usersTable = knex.client.wrapIdentifier('users', (value) => `\`${value}\``);
+    await knex.raw(`ALTER TABLE ${usersTable} MODIFY COLUMN wp_user_id BIGINT(20) UNSIGNED NULL`);
     await knex.raw(
         `UPDATE ${usersTable} bnc
             JOIN wp_users wp ON LOWER(wp.user_login) = LOWER(bnc.username)
