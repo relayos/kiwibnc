@@ -4,7 +4,6 @@ const knex = require('knex');
 module.exports = class Database {
     constructor(config) {
         let dbConf = config.get('database', {});
-
 		this.dbConnections = knex({
 			client: 'better-sqlite3',
 			connection: {

@@ -31,20 +31,84 @@
                     <span v-if="!loading" v-html="buttonText"></span>
                     <i v-else class="fa fa-spinner fa-spin" aria-hidden="true" ></i>
                 </button>
-                <div @click="showLogin=!showLogin">
-                    <span v-if="showLogin">
-                        <a class="u-link">Create an account</a>
-                    </span>
-                    <span v-else>
-                        <a class="u-link">
-                            <i class="fa fa-chevron-left"></i> I already have an account
-                        </a>
-                    </span>
-                </div>
                 <div v-html="footerText"></div>
             </form>
         </template>
     </startup-layout>
+</template>
+
+<template id="kiwibnc-bufferlist">
+    <div :class="{ 'kiwibnc-bufferlist-padding-top': !list.length && !isLoading }" class="kiwibnc-bufferlist">
+        <div class="kiwibnc-bufferlist-content-container">
+            <div class="kiwibnc-bufferlist-nav">
+                <form class="u-form u-form--big kiwibnc-bufferlist-search" @submit.prevent="doSearch">
+                    <input v-model="search" placeholder="Search conversations..." class="u-input">
+                    <a
+                        :class="{
+                            'u-button-primary': !isLoading,
+                            'u-button-secondary': isLoading,
+                        }"
+                        class="u-button kiwibnc-bufferlist-refresh"
+                        @click="doSearch"
+                    >
+                        <i v-if="!isLoading" class="fa fa-search" aria-hidden="true"></i>
+                        <i v-else class="fa fa-refresh fa-spin" aria-hidden="true"></i>
+                    </a>
+                </form>
+                <label class="kiwibnc-bufferlist-content-search" @click="onContentSearchClick">
+                    <input type="checkbox" v-model="searchContent" :disabled="!hasContentSearchAccess">
+                    <span>Search inside messages</span>
+                    <span v-if="!hasContentSearchAccess" class="kiwibnc-pro-badge">Pro</span>
+                </label>
+                <div v-if="showUpgradePrompt" class="kiwibnc-upgrade-prompt">
+                    <i class="fa fa-lock" aria-hidden="true"></i>
+                    Full-text message search requires a Pro subscription.
+                    <a href="#" class="u-link" @click.prevent="dismissUpgrade">Dismiss</a>
+                </div>
+                <div v-if="list.length" class="kiwibnc-bufferlist-status">
+                    Showing {{ list.length }} conversations
+                </div>
+            </div>
+            <div v-if="!isLoading && list.length" class="kiwibnc-bufferlist-table">
+                <div
+                    v-for="buf in list"
+                    :key="buf.buffer"
+                    class="kiwibnc-bufferlist-grid"
+                >
+                    <div class="kiwibnc-bufferlist-count">{{ buf.message_count || 0 }}</div>
+                    <div
+                        class="u-link kiwibnc-bufferlist-name"
+                        @click="openBuffer(buf.buffer)"
+                    >{{ buf.buffer }}</div>
+                    <span class="kiwibnc-bufferlist-time">
+                        {{ formatTime(buf.last_time) }}
+                    </span>
+                    <div class="kiwibnc-bufferlist-open">
+                        <a
+                            class="u-button u-button-primary"
+                            @click="openBuffer(buf.buffer)"
+                        >Open</a>
+                    </div>
+                </div>
+            </div>
+            <div v-else-if="noResults" class="kiwibnc-bufferlist-info">
+                <p>No conversations found</p>
+            </div>
+            <div v-else-if="isLoading" class="kiwibnc-bufferlist-info">
+                <i class="fa fa-spinner fa-spin" aria-hidden="true"></i> Searching...
+            </div>
+            <div v-else class="kiwibnc-bufferlist-info">
+                <p>Search your message history</p>
+                <p class="kiwibnc-bufferlist-hint">Enter a name to find past conversations</p>
+            </div>
+            <div v-if="hasMore && !isLoading" class="kiwibnc-bufferlist-nav kiwibnc-bufferlist-loadmore">
+                <a class="u-button u-button-secondary" @click="loadMore">Load more results</a>
+            </div>
+            <div v-if="isLoading && list.length" class="kiwibnc-bufferlist-nav">
+                <i class="fa fa-spinner fa-spin" aria-hidden="true"></i> Loading...
+            </div>
+        </div>
+    </div>
 </template>
 
 <template id="kiwibnc-admin">
@@ -133,11 +197,34 @@
 
 <script>
     kiwi.plugin('kiwibnc', function(kiwi, log) {
+        const PLUGIN_VERSION = 46;
+        console.log('[kiwibnc] plugin loaded, version:', PLUGIN_VERSION);
+
         const basePath = kiwi.state.settings.plugins.find(p => p.name === 'kiwibnc').basePath;
         const InputText = kiwi.require('components/utils/InputText');
         const StartupLayout = kiwi.require('components/startups/CommonLayout');
         const BouncerProvider = kiwi.require('libs/BouncerProvider');
         const Misc = kiwi.require('helpers/Misc');
+        const bufferTools = kiwi.require('libs/bufferTools');
+
+        // Override orderBuffers to sort queries by last_read (most recent first)
+        const originalOrderBuffers = bufferTools.orderBuffers;
+        bufferTools.orderBuffers = function(buffers) {
+            let list = buffers.map(b => b);
+            list = list.filter(buffer => !buffer.isServer());
+            list = list.sort((a, b) => {
+                // Channels before queries
+                if (a.isChannel() && b.isQuery()) return -1;
+                if (a.isQuery() && b.isChannel()) return 1;
+                // Queries: sort by last_read descending (most recent first)
+                if (a.isQuery() && b.isQuery()) {
+                    return (b.last_read || 0) - (a.last_read || 0);
+                }
+                // Channels: alphabetical
+                return a.name.localeCompare(b.name);
+            });
+            return list;
+        };
 
         let adminToken = '';
 
@@ -156,14 +243,12 @@
                     password: '',
                     remember: false,
                     tokenLogin: false,
+                    sessionToken: '',
+                    bncNetworkIds: [],
                 };
             },
             computed: {
                 greetingText() {
-                    if (!this.showLogin) {
-                        return 'Create an account';
-                    }
-
                     const greeting = this.$state.settings.startupOptions.greetingText;
                     return typeof greeting === 'string' ?
                         greeting :
@@ -179,10 +264,6 @@
                 buttonText() {
                     if (this.loading) {
                         return '';
-                    }
-
-                    if (!this.showLogin) {
-                        return 'Create my account';
                     }
 
                     const buttonText = this.$state.settings.startupOptions.buttonText;
@@ -212,6 +293,7 @@
                 if (username && token) {
                     this.username = username;
                     this.password = token;
+                    this.sessionToken = token;
                     this.remember = true;
                     this.tokenLogin = true;
                     this.startUp();
@@ -223,11 +305,7 @@
                     options.remember_buffers = false;
                 },
                 onSubmit() {
-                    if (this.showLogin) {
-                        this.startUp();
-                    } else {
-                        this.createAccount();
-                    }
+                    this.startUp();
                 },
                 startUp() {
                     this.loading = true;
@@ -235,6 +313,9 @@
 
                     const options = Object.assign({}, this.$state.settings.startupOptions);
                     const connectOptions = this.connectOptions();
+                    if (this.tokenLogin && this.password) {
+                        this.sessionToken = this.password;
+                    }
                     const net = this.network || this.$state.addNetwork('Network', this.username, {
                         server: connectOptions.hostname,
                         port: connectOptions.port,
@@ -257,13 +338,13 @@
 
                     this.network = net;
 
-                    // auto login support
-                    if (this.remember) {
-                        this.$state.$once('irc.bouncer networks', this.requestUserToken);
-                    } else {
+                    // Always request a token for HTTP API access
+                    this.$state.$once('irc.bouncer networks', this.requestUserToken);
+
+                    // Clear stale auto-login if logging in manually without remember
+                    if (!this.remember) {
                         const { username, token } = this.getLogin();
                         if (username || token) {
-                            // Clear out potentially invalid tokens when logging in manually
                             this.$once('start', () => {
                                 this.forgetLogin();
                             });
@@ -274,6 +355,22 @@
                     const onRegistered = () => {
                         if (this.$refs.layout) {
                             this.$refs.layout.close();
+                        }
+                        // Auto-connect to upstream networks if enabled
+                        // Buffer fetch is handled separately by receiveUserToken via httpapi
+                        const autoconnect = this.$state.settings.startupOptions.autoconnect;
+                        if (autoconnect) {
+                            const netid = net.ircClient.bnc.tags().netid;
+                            if (netid) {
+                                console.log('[kiwibnc] autoconnect: connecting to network', netid);
+                                net.ircClient.raw('BOUNCER', 'connect', netid);
+                            } else {
+                                // No netid in ISUPPORT - need to list networks first
+                                console.log('[kiwibnc] autoconnect: listing networks...');
+                                this.autoConnectNetworks(net);
+                            }
+                        } else {
+                            console.log('[kiwibnc] autoconnect disabled');
                         }
                         net.ircClient.off('registered', onRegistered);
                         net.ircClient.off('close', onClosed);
@@ -305,36 +402,6 @@
                     };
                     net.ircClient.once('registered', onRegistered);
                     net.ircClient.once('close', onClosed);
-                },
-                createAccount() {
-                    this.loading = true;
-                    this.errorMessage = '';
-
-                    const data = new FormData();
-                    data.append('username', this.username);
-                    data.append('password', this.password);
-
-                    fetch('/api/register', {
-                        method: 'POST',
-                        body: data,
-                    })
-                        .then((res) => res.json())
-                        .then((resp) => {
-                            this.loading = false;
-
-                            if (resp.error) {
-                                this.errorMessage = this.friendlyErrorMessage(resp.error);
-                                return;
-                            }
-
-                            this.remember = false;
-                            this.startUp();
-                        })
-                        // eslint-disable-next-line handle-callback-err
-                        .catch((err) => {
-                            this.errorMessage = this.friendlyErrorMessage('unknown_error');
-                            this.loading = false;
-                        });
                 },
                 friendlyErrorMessage(errCode) {
                     const errs = {
@@ -373,13 +440,15 @@
                         return;
                     }
 
-                    if (this.tokenLogin) {
-                        // Authed using a token, extend its expiration a further 7days
-                        network.ircClient.say('*bnc', `changetoken ${this.password} 7d`);
+                    // Always request a short-lived token we can use for httpapi calls
+                    this.$state.$on('irc.message', this.receiveUserToken);
+                    const duration = this.remember ? '7d' : '1d';
+
+                    if (this.tokenLogin && this.password) {
+                        this.sessionToken = this.password;
+                        network.ircClient.say('*bnc', `changetoken ${this.password} ${duration}`);
                     } else {
-                        // Create a new auth token so we can auto login next time the page is opened
-                        this.$state.$on('irc.message', this.receiveUserToken);
-                        network.ircClient.say('*bnc', 'addtoken 7d webchat');
+                        network.ircClient.say('*bnc', `addtoken ${duration} webchat`);
                     }
                 },
                 receiveUserToken(event, network) {
@@ -391,12 +460,105 @@
                     }
 
                     const token = event.tags['+auth_token'];
-                    // State peristance is not currently ready. set our username/token when it is
+                    this.sessionToken = token;
+                    // State persistence is not currently ready. set our username/token when it is
                     // start is emitted from CommonLayout.vue
                     this.$once('start', () => {
-                        this.rememberLogin(network.nick, token);
+                        if (this.remember) {
+                            this.rememberLogin(network.nick, token);
+                        }
                     });
                     this.$state.$off('irc.message', this.receiveUserToken);
+
+                    // Fetch buffers from httpapi immediately - no upstream needed
+                    if (this.network) {
+                        this.prefetchRecentBuffers(this.network);
+                    }
+                },
+                autoConnectNetworks(bncNet) {
+                    // Listen for Kiwi's bouncer networks event (after BouncerProvider creates them)
+                    // Then trigger connections via proper Kiwi flow
+                    const onBouncerNetworks = (networks) => {
+                        console.log('[kiwibnc] bouncer networks event, got', networks.length, 'networks');
+                        this.$state.$off('irc.bouncer networks', onBouncerNetworks);
+
+                        // Store network IDs for buffer prefetch
+                        networks.forEach(n => {
+                            if (n.networkId) {
+                                this.bncNetworkIds.push(n.networkId);
+                            }
+                        });
+
+                        // Give BouncerProvider time to finish creating network entries
+                        setTimeout(() => {
+                            this.connectUpstreamNetworks(bncNet);
+                        }, 100);
+                    };
+                    this.$state.$on('irc.bouncer networks', onBouncerNetworks);
+                },
+                connectUpstreamNetworks(bncNet) {
+                    // Find all upstream networks and connect them via proper Kiwi flow
+                    const upstreamNets = this.$state.networks.filter(n =>
+                        n.connection && n.connection.bncnetid && !n.is_bnc
+                    );
+                    console.log('[kiwibnc] connecting', upstreamNets.length, 'upstream networks');
+
+                    upstreamNets.forEach(net => {
+                        const netid = net.connection.bncnetid;
+                        console.log('[kiwibnc] connecting upstream network:', net.name, 'netid:', netid, 'state:', net.state);
+                        // Use Kiwi's proper connection flow - calling ircClient.connect()
+                        // triggers BouncerProvider to rewrite connection and send BOUNCER connect
+                        if (net.state !== 'connected') {
+                            net.ircClient.connect();
+                        }
+                    });
+                },
+                listenForNetworkState(bncNet) {
+                    // Listen for BOUNCER state messages to sync network state
+                    const onRaw = (event) => {
+                        const msg = event.line;
+                        // BOUNCER state <netid> <netname> connected|disconnected
+                        if (msg.includes('BOUNCER') && msg.includes('state')) {
+                            const match = msg.match(/BOUNCER\s+state\s+(\d+)\s+\S+\s+(connected|disconnected)/i);
+                            if (match) {
+                                const [, netid, state] = match;
+                                console.log('[kiwibnc] network state update:', netid, state);
+                                this.syncUpstreamNetworkState(netid, state === 'connected');
+                            }
+                        }
+                    };
+                    bncNet.ircClient.on('raw', onRaw);
+                    // Also do initial sync for already-connected networks
+                    setTimeout(() => {
+                        this.bncNetworkIds.forEach(netid => {
+                            this.syncUpstreamNetworkState(netid, true);
+                        });
+                    }, 500);
+                },
+                syncUpstreamNetworkState(netid, connected) {
+                    // Find the Kiwi network matching this bncnetid and sync its state
+                    const upstreamNet = this.$state.networks.find(n =>
+                        n.connection && n.connection.bncnetid === netid
+                    );
+                    if (upstreamNet) {
+                        const newState = connected ? 'connected' : 'disconnected';
+                        console.log('[kiwibnc] syncing upstream network state for', netid, upstreamNet.name, '->', newState);
+                        if (upstreamNet.state !== newState) {
+                            upstreamNet.state = newState;
+                        }
+                    } else {
+                        console.log('[kiwibnc] could not find upstream network for netid', netid);
+                        // Retry once more after delay
+                        setTimeout(() => {
+                            const retry = this.$state.networks.find(n =>
+                                n.connection && n.connection.bncnetid === netid
+                            );
+                            if (retry && retry.state !== (connected ? 'connected' : 'disconnected')) {
+                                retry.state = connected ? 'connected' : 'disconnected';
+                                console.log('[kiwibnc] set upstream network state to connected (retry)');
+                            }
+                        }, 1000);
+                    }
                 },
                 getLogin() {
                     const { username, token } = this.$state.setting('auto_login') || {};
@@ -404,6 +566,116 @@
                         username,
                         token,
                     };
+                },
+                async prefetchRecentBuffers(bncNet) {
+                    // Fetch recent buffers from httpapi and create them in Kiwi
+                    // CHATHISTORY is handled automatically by Kiwi when buffers are opened
+                    // (via buffers.auto_request_history config)
+                    if (!this.sessionToken) {
+                        return;
+                    }
+                    try {
+                        const resp = await fetch(`/httpapi?command=recentbuffers`, {
+                            headers: { Authorization: `Bearer ${this.sessionToken}` },
+                        }).then(r => r.json());
+                        if (!resp || resp.error || !resp.result || !Array.isArray(resp.result.buffers)) {
+                            console.log('[kiwibnc] prefetchRecentBuffers: no buffers or error', resp);
+                            return;
+                        }
+                        console.log('[kiwibnc] prefetchRecentBuffers: got', resp.result.buffers.length, 'buffers');
+
+                        // Find the upstream network by matching bncnetid
+                        const allNetworks = this.$state.networks;
+                        console.log('[kiwibnc] looking for networks with bncnetid in:', this.bncNetworkIds);
+                        console.log('[kiwibnc] all networks:', allNetworks.map(n => ({
+                            id: n.id,
+                            name: n.name,
+                            bncnetid: n.connection?.bncnetid,
+                            state: n.state
+                        })));
+
+                        // Find upstream network by bncnetid match
+                        let net = allNetworks.find(n =>
+                            n.connection?.bncnetid &&
+                            this.bncNetworkIds.includes(n.connection.bncnetid)
+                        );
+
+                        if (!net) {
+                            // Fallback: maybe upstream isn't created in Kiwi yet, wait for BouncerProvider
+                            console.log('[kiwibnc] no upstream network found yet, waiting...');
+                            setTimeout(() => this.prefetchRecentBuffers(bncNet), 1000);
+                            return;
+                        }
+
+                        console.log('[kiwibnc] using upstream network:', net.id, net.name, 'bncnetid:', net.connection.bncnetid);
+                        console.log('[kiwibnc] existing buffers:', net.buffers.map(b => b.name));
+
+                        const createdBuffers = [];
+                        resp.result.buffers.forEach(buf => {
+                            if (!buf.buffer) {
+                                return;
+                            }
+                            const target = buf.buffer;
+                            // Create buffer in Kiwi - history auto-requested when opened
+                            let buffer = this.$state.getBufferByName(net.id, target);
+                            if (!buffer) {
+                                console.log('[kiwibnc] creating buffer for', target);
+                                buffer = this.$state.addBuffer(net.id, target);
+                                if (buffer) {
+                                    createdBuffers.push(target);
+                                    // Set last_read to influence sort order (most recent first)
+                                    if (buf.last_time) {
+                                        buffer.last_read = buf.last_time;
+                                    }
+                                    console.log('[kiwibnc] buffer created:', target, 'last_read:', buffer.last_read);
+
+                                    // Fetch messages via HTTP API (CHATHISTORY doesn't work in bouncer mode
+                                    // because authNetworkId isn't set on the controller connection)
+                                    this.fetchBufferMessages(buffer, target);
+                                } else {
+                                    console.log('[kiwibnc] addBuffer returned null for', target);
+                                }
+                            } else {
+                                console.log('[kiwibnc] buffer already exists:', target);
+                            }
+                        });
+
+                        // Store session token globally for BufferList component
+                        kiwi.kiwibnc = kiwi.kiwibnc || {};
+                        kiwi.kiwibnc.sessionToken = this.sessionToken;
+                    } catch (err) {
+                        console.error('[kiwibnc] prefetchRecentBuffers error:', err);
+                    }
+                },
+                async fetchBufferMessages(buffer, target) {
+                    // Fetch messages via HTTP API and add them to the buffer
+                    if (!this.sessionToken) {
+                        return;
+                    }
+                    try {
+                        const resp = await fetch(`/httpapi?command=messages&buffer=${encodeURIComponent(target)}&limit=50`, {
+                            headers: { Authorization: `Bearer ${this.sessionToken}` },
+                        }).then(r => r.json());
+                        if (!resp || resp.error || !resp.result || !Array.isArray(resp.result.messages)) {
+                            console.log('[kiwibnc] fetchBufferMessages: no messages or error for', target, resp);
+                            return;
+                        }
+                        console.log('[kiwibnc] fetchBufferMessages: got', resp.result.messages.length, 'messages for', target);
+
+                        // Add messages to buffer
+                        resp.result.messages.forEach(msg => {
+                            if (msg.type === 'privmsg' || msg.type === 'notice') {
+                                this.$state.addMessage(buffer, {
+                                    time: msg.time,
+                                    nick: msg.nick || '',
+                                    message: msg.message,
+                                    type: msg.type,
+                                });
+                            }
+                        });
+                    } catch (err) {
+                        console.error('[kiwibnc] fetchBufferMessages error:', err);
+                    }
                 },
                 rememberLogin(username, token) {
                     this.$state.setting('auto_login', { username, token });
@@ -576,6 +848,302 @@
 
         kiwi.addStartup('kiwibnc', startupScreen);
 
+        // BufferList component for server tab (like ChannelList)
+        // Uses server-side pagination via "Load more" - better for future tier-based limits
+        const BufferList = {
+            template: '#kiwibnc-bufferlist',
+            props: ['network'],
+            data() {
+                return {
+                    search: '',
+                    list: [],
+                    offset: 0,
+                    hasMore: false,
+                    isLoading: false,
+                    searched: false,
+                    searchContent: false,
+                    showUpgradePrompt: false,
+                };
+            },
+            computed: {
+                noResults() {
+                    return this.searched && !this.isLoading && this.list.length === 0;
+                },
+                hasContentSearchAccess() {
+                    // TODO: Check user's tier from kiwi.kiwibnc.userTier or similar
+                    // For now, always false (feature not yet available)
+                    return false;
+                },
+            },
+            created() {
+                // Don't auto-search - user already has recent buffers in sidebar
+                // Wait for them to enter a search term
+            },
+            methods: {
+                async doSearch() {
+                    if (this.isLoading) return;
+                    const token = kiwi.kiwibnc?.sessionToken;
+                    if (!token) {
+                        console.log('[kiwibnc] BufferList: no session token');
+                        return;
+                    }
+
+                    this.isLoading = true;
+                    this.list = [];
+                    this.offset = 0;
+                    this.searched = true;
+
+                    try {
+                        let url = `/httpapi?command=recentbuffers&offset=0`;
+                        if (this.search.trim()) {
+                            url += `&search=${encodeURIComponent(this.search.trim())}`;
+                        }
+                        const resp = await fetch(url, {
+                            headers: { Authorization: `Bearer ${token}` },
+                        }).then(r => r.json());
+
+                        console.log('[kiwibnc] BufferList search response:', resp);
+
+                        if (resp?.result?.buffers) {
+                            this.list = resp.result.buffers;
+                            this.offset = resp.result.buffers.length;
+                            const limit = resp.result.meta?.limit || 20;
+                            this.hasMore = resp.result.buffers.length >= limit;
+                        }
+                    } catch (e) {
+                        console.error('[kiwibnc] BufferList search error:', e);
+                    }
+                    this.isLoading = false;
+                },
+                async loadMore() {
+                    if (this.isLoading || !this.hasMore) return;
+                    const token = kiwi.kiwibnc?.sessionToken;
+                    if (!token) return;
+
+                    this.isLoading = true;
+                    try {
+                        let url = `/httpapi?command=recentbuffers&offset=${this.offset}`;
+                        if (this.search.trim()) {
+                            url += `&search=${encodeURIComponent(this.search.trim())}`;
+                        }
+                        console.log('[kiwibnc] BufferList loadMore:', url);
+
+                        const resp = await fetch(url, {
+                            headers: { Authorization: `Bearer ${token}` },
+                        }).then(r => r.json());
+
+                        console.log('[kiwibnc] BufferList loadMore response:', resp);
+
+                        if (resp?.result?.buffers?.length) {
+                            this.list = this.list.concat(resp.result.buffers);
+                            this.offset += resp.result.buffers.length;
+                            const limit = resp.result.meta?.limit || 20;
+                            this.hasMore = resp.result.buffers.length >= limit;
+                        } else {
+                            this.hasMore = false;
+                        }
+                    } catch (e) {
+                        console.error('[kiwibnc] BufferList loadMore error:', e);
+                    }
+                    this.isLoading = false;
+                },
+                formatTime(ts) {
+                    if (!ts) return '';
+                    return new Date(ts).toLocaleString();
+                },
+                onContentSearchClick(e) {
+                    if (!this.hasContentSearchAccess) {
+                        e.preventDefault();
+                        this.showUpgradePrompt = true;
+                    }
+                },
+                dismissUpgrade() {
+                    this.showUpgradePrompt = false;
+                },
+                async openBuffer(target) {
+                    // Find upstream network and add/activate buffer
+                    const net = this.$state.networks.find(n => n.connection?.bncnetid);
+                    if (net) {
+                        let buffer = this.$state.getBufferByName(net.id, target);
+                        const isNew = !buffer;
+                        if (!buffer) {
+                            buffer = this.$state.addBuffer(net.id, target);
+                        }
+                        if (buffer) {
+                            this.$state.setActiveBuffer(net.id, target);
+                            // Fetch messages if buffer was just created or is empty
+                            if (isNew || buffer.getMessages().length === 0) {
+                                await this.fetchBufferMessages(buffer, target);
+                            }
+                        }
+                    }
+                    // Hide sidebar on mobile
+                    if (this.$state.ui.is_narrow) {
+                        this.$state.$emit('statebrowser.hide');
+                    }
+                },
+                async fetchBufferMessages(buffer, target) {
+                    const token = kiwi.kiwibnc?.sessionToken;
+                    if (!token) {
+                        console.log('[kiwibnc] BufferList: no session token for messages');
+                        return;
+                    }
+                    try {
+                        const resp = await fetch(`/httpapi?command=messages&buffer=${encodeURIComponent(target)}&limit=50`, {
+                            headers: { Authorization: `Bearer ${token}` },
+                        }).then(r => r.json());
+                        if (!resp || resp.error || !resp.result || !Array.isArray(resp.result.messages)) {
+                            console.log('[kiwibnc] BufferList: no messages or error for', target, resp);
+                            return;
+                        }
+                        console.log('[kiwibnc] BufferList: got', resp.result.messages.length, 'messages for', target);
+                        resp.result.messages.forEach(msg => {
+                            if (msg.type === 'privmsg' || msg.type === 'notice') {
+                                this.$state.addMessage(buffer, {
+                                    time: msg.time,
+                                    nick: msg.nick || '',
+                                    message: msg.message,
+                                    type: msg.type,
+                                });
+                            }
+                        });
+                    } catch (err) {
+                        console.error('[kiwibnc] BufferList: fetchBufferMessages error:', err);
+                    }
+                },
+            },
+        };
+
+        // Register BufferList as a server tab
+        kiwi.addTab('server', 'Message History', BufferList);
+
+        // Add UI elements to sidebar after app starts
+        const addSidebarElements = () => {
+            // Inject inline filter + "Find More Messages" link for queries section
+            // Similar to how channels section has "Filter Channels" + "Find More Channels"
+            const tryInjectFilter = () => {
+                const queriesSection = document.querySelector('.kiwi-statebrowser-buffers[data-name="queries"]');
+                if (!queriesSection) {
+                    setTimeout(tryInjectFilter, 500);
+                    return;
+                }
+
+                // Find the options container (where search icon goes)
+                const optionsContainer = queriesSection.querySelector('.kiwi-statebrowser-channels-options');
+                if (!optionsContainer) {
+                    setTimeout(tryInjectFilter, 500);
+                    return;
+                }
+
+                // Already added?
+                if (queriesSection.querySelector('.kiwibnc-messagefilter')) {
+                    return;
+                }
+
+                // Add search icon that toggles the filter
+                let searchBtn = optionsContainer.querySelector('.kiwibnc-messages-search');
+                if (!searchBtn) {
+                    searchBtn = document.createElement('div');
+                    searchBtn.className = 'kiwi-statebrowser-network-option kiwibnc-messages-search';
+                    searchBtn.innerHTML = '<i class="fa fa-search" aria-hidden="true"></i>';
+                    const closeBtn = optionsContainer.querySelector('.kiwi-statebrowser-queries-close');
+                    if (closeBtn) {
+                        optionsContainer.insertBefore(searchBtn, closeBtn);
+                    } else {
+                        optionsContainer.appendChild(searchBtn);
+                    }
+                }
+
+                // Create the inline filter panel (hidden by default)
+                const filterPanel = document.createElement('div');
+                filterPanel.className = 'kiwibnc-messagefilter';
+                filterPanel.style.display = 'none';
+                filterPanel.innerHTML = `
+                    <input type="text" class="kiwibnc-messagefilter-input" placeholder="Filter messages...">
+                    <p><a class="kiwibnc-find-more u-link">Find More Messages</a></p>
+                `;
+
+                // Insert after the header row
+                const headerRow = queriesSection.querySelector('.kiwi-statebrowser-channels');
+                if (headerRow && headerRow.nextSibling) {
+                    headerRow.parentNode.insertBefore(filterPanel, headerRow.nextSibling);
+                } else {
+                    queriesSection.insertBefore(filterPanel, queriesSection.firstChild?.nextSibling);
+                }
+
+                const filterInput = filterPanel.querySelector('.kiwibnc-messagefilter-input');
+                const findMoreLink = filterPanel.querySelector('.kiwibnc-find-more');
+
+                // Toggle filter visibility
+                searchBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const isVisible = filterPanel.style.display !== 'none';
+                    filterPanel.style.display = isVisible ? 'none' : 'block';
+                    if (!isVisible) {
+                        filterInput.focus();
+                    }
+                    searchBtn.classList.toggle('active', !isVisible);
+                });
+
+                // Filter input - filter visible buffers in sidebar
+                filterInput.addEventListener('input', (e) => {
+                    const q = e.target.value.toLowerCase();
+                    const bufferItems = queriesSection.querySelectorAll('.kiwi-statebrowser-channel');
+                    bufferItems.forEach(item => {
+                        const name = item.textContent.toLowerCase();
+                        item.style.display = !q || name.includes(q) ? '' : 'none';
+                    });
+                });
+
+                // Close filter on blur (with delay for click events)
+                filterInput.addEventListener('blur', () => {
+                    setTimeout(() => {
+                        if (!filterPanel.contains(document.activeElement)) {
+                            filterPanel.style.display = 'none';
+                            searchBtn.classList.remove('active');
+                            // Reset filter
+                            filterInput.value = '';
+                            const bufferItems = queriesSection.querySelectorAll('.kiwi-statebrowser-channel');
+                            bufferItems.forEach(item => item.style.display = '');
+                        }
+                    }, 200);
+                });
+
+                // ESC closes filter
+                filterInput.addEventListener('keyup', (e) => {
+                    if (e.key === 'Escape') {
+                        filterPanel.style.display = 'none';
+                        searchBtn.classList.remove('active');
+                        filterInput.value = '';
+                        const bufferItems = queriesSection.querySelectorAll('.kiwi-statebrowser-channel');
+                        bufferItems.forEach(item => item.style.display = '');
+                    }
+                });
+
+                // "Find More Messages" opens server tab
+                findMoreLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    filterPanel.style.display = 'none';
+                    searchBtn.classList.remove('active');
+
+                    // Find an upstream network and show its server buffer with our tab
+                    const net = kiwi.state.networks.find(n => n.connection?.bncnetid);
+                    if (net) {
+                        net.showServerBuffer('Message History');
+                    }
+                    if (kiwi.state.ui.is_narrow) {
+                        kiwi.state.$emit('statebrowser.hide');
+                    }
+                });
+            };
+
+            tryInjectFilter();
+        };
+
+        // Call immediately and also on start event
+        kiwi.on('start', addSidebarElements);
+        setTimeout(addSidebarElements, 3000);
+
         let adminAdded = false;
         kiwi.on('irc.motd', function(event, network) {
             // kiwibnc admin users get a kiwibnc/admin=token ISUPPORTs token added. The token
@@ -632,6 +1200,229 @@
     border: 1px solid rgba(0,0,0,0.1);
     padding: 1em;
     margin: 1em 0;
+}
+
+/* Inline message filter in sidebar */
+.kiwibnc-messagefilter {
+    padding: 5px 15px;
+}
+
+.kiwibnc-messagefilter-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid rgba(0,0,0,0.2);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+}
+
+.kiwibnc-messagefilter p {
+    margin: 5px 0 0 0;
+    font-size: 0.9em;
+}
+
+.kiwibnc-messages-search.active {
+    opacity: 1;
+}
+
+/* Fix native sidebar styling: non-bold by default, bold only for unread */
+.kiwi-statebrowser-channel .kiwi-statebrowser-channel-name {
+    font-weight: normal;
+}
+
+/* Bold when buffer has unread messages (label element is present) */
+.kiwi-statebrowser-channel:has(.kiwi-statebrowser-channel-label) .kiwi-statebrowser-channel-name {
+    font-weight: bold;
+}
+
+/* BufferList component styles (like ChannelList) */
+.kiwibnc-bufferlist {
+    box-sizing: border-box;
+    padding-bottom: 1em;
+    text-align: center;
+    transition: all 0.6s;
+}
+
+.kiwibnc-bufferlist-padding-top {
+    padding-top: calc(45vh - 80px);
+}
+
+.kiwibnc-bufferlist-padding-top .kiwibnc-bufferlist-nav {
+    width: 100%;
+    text-align: center;
+}
+
+.kiwibnc-bufferlist-nav {
+    padding: 10px 20px;
+    box-sizing: border-box;
+}
+
+.kiwibnc-bufferlist-nav .u-form {
+    display: flex;
+    justify-content: center;
+}
+
+.kiwibnc-bufferlist-nav .u-form .u-input {
+    width: 324px;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.kiwibnc-bufferlist-nav .u-form .u-button-primary,
+.kiwibnc-bufferlist-nav .u-form .u-button-secondary {
+    font-size: 1.3em;
+    border-radius: 0 5px 5px 0;
+    border: none;
+    display: flex;
+    align-items: center;
+}
+
+.kiwibnc-bufferlist-status {
+    margin-top: 10px;
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
+.kiwibnc-bufferlist-content-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 0.9em;
+    cursor: pointer;
+}
+
+.kiwibnc-bufferlist-content-search input[disabled] {
+    cursor: not-allowed;
+}
+
+.kiwibnc-pro-badge {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    font-size: 0.7em;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.kiwibnc-upgrade-prompt {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(102, 126, 234, 0.1);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 4px;
+    font-size: 0.85em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.kiwibnc-upgrade-prompt i {
+    color: #667eea;
+}
+
+.kiwibnc-bufferlist-search {
+    display: inline-block;
+}
+
+.kiwibnc-bufferlist-loadmore {
+    margin-top: 20px;
+}
+
+.kiwibnc-bufferlist-info {
+    text-align: center;
+    padding: 20px;
+}
+
+.kiwibnc-bufferlist-hint {
+    font-size: 0.85em;
+    opacity: 0.6;
+    margin-top: 5px;
+}
+
+.kiwibnc-bufferlist-table {
+    margin: 0 auto;
+    width: 90%;
+    max-width: 1800px;
+    box-sizing: border-box;
+}
+
+.kiwibnc-bufferlist-grid {
+    display: grid;
+    grid-template-columns: 66px 150px auto min-content;
+    border-bottom: 1px solid;
+    align-items: center;
+    text-align: left;
+}
+
+.kiwibnc-bufferlist-grid:first-of-type {
+    border-top: 1px solid;
+}
+
+.kiwibnc-bufferlist-count {
+    margin-left: 0.2em;
+    overflow: hidden;
+    padding: 0.3em;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.kiwibnc-bufferlist-count::before {
+    font-family: fontAwesome, sans-serif;
+    padding-right: 0.4em;
+    content: '\f0e0';
+}
+
+.kiwibnc-bufferlist-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: normal;
+}
+
+/* Match native sidebar label styling for message count */
+.kiwibnc-bufferlist-count {
+    font-weight: normal;
+}
+
+.kiwibnc-bufferlist-time {
+    display: inline-block;
+    grid-column: 3;
+    padding: 0.3em 0.5em;
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
+.kiwibnc-bufferlist-open {
+    grid-column: 4;
+    padding: 0.3em;
+}
+
+@media screen and (max-width: 770px) {
+    .kiwibnc-bufferlist-nav .u-form .u-input {
+        width: 100%;
+    }
+
+    .kiwibnc-bufferlist-table {
+        width: 100%;
+    }
+
+    .kiwibnc-bufferlist-grid {
+        grid-template-columns: 66px auto min-content;
+    }
+
+    .kiwibnc-bufferlist-time {
+        grid-column: 1 / span 3;
+        grid-row: 2;
+    }
+
+    .kiwibnc-bufferlist-open {
+        grid-column: 3;
+    }
 }
 
 </style>

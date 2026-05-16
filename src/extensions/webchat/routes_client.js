@@ -35,13 +35,15 @@ module.exports = function(app) {
             bouncer: true,
             remember_buffers: false,
             public_register : app.conf.get('webchat.public_register', false),
+            autoconnect: app.conf.get('webchat.autoconnect', false),
         };
 
         // Add our kiwi plugin to the config
         config.plugins = config.plugins || [];
         config.plugins.push({
             name: 'kiwibnc',
-            url: router.url('kiwi.bnc_plugin', {}),
+            // version bump to bust client cache when plugin changes
+            url: router.url('kiwi.bnc_plugin', {}) + '?v=46',
             basePath: ctx.basePath,
         });
 

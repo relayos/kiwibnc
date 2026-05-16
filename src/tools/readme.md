@@ -38,3 +38,40 @@ $ node src/tools/recover.js
 $ node src/tools/recover_worker.js
 Found correct value of 239
 ~~~
+
+### MariaDB JSONL importer
+Convert newline-delimited JSON message exports into a TSV file ready for `LOAD DATA INFILE`
+into the MariaDB message store schema in `src/worker/messagestores/mariadb.js`. Useful for
+bulk imports (~400M rows) while keeping inserts fast.
+
+~~~
+$ node src/tools/mariadb_jsonl_to_loadfile.js --input messages.jsonl --output messages.tsv --buffer-normalize lower
+Processed 100000 lines (100000 written, 0 skipped)
+Done. Lines read: 100000. Written: 100000. Skipped: 0.
+~~~
+
+The TSV columns match the table order: `user_id, network_id, buffer, buffer_lower, time, type, msgid, msgtags, prefix, params, data`.
+`type` is mapped from `PRIVMSG` or `NOTICE`; unknown types are skipped. `buffer_lower` follows the
+same `buffer_normalize` setting as the message store (`none|lower|alnum`).
+
+Streaming stdin to mysql:
+
+~~~
+node src/tools/mariadb_jsonl_to_loadfile.js --buffer-normalize lower \
+  | mysql --local-infile=1 -h HOST -u USER -p DBNAME \
+    -e "LOAD DATA LOCAL INFILE '/dev/stdin'
+        INTO TABLE messages
+        FIELDS TERMINATED BY '\t' ESCAPED BY '\\\\'
+        LINES TERMINATED BY '\n'
+        (user_id, network_id, buffer, buffer_lower, time, type, msgid, msgtags, prefix, params, data);"
+~~~
+
+Example load command:
+
+~~~
+LOAD DATA LOCAL INFILE '/tmp/messages.tsv'
+INTO TABLE messages
+FIELDS TERMINATED BY '\t' ESCAPED BY '\\\\'
+LINES TERMINATED BY '\n'
+(user_id, network_id, buffer, buffer_lower, time, type, msgid, msgtags, prefix, params, data);
+~~~

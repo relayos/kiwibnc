@@ -154,6 +154,9 @@ class Users {
     }
 
     async updateUserTokenAccess(userId, token, userHost) {
+        if (!userId || !token) {
+            return;
+        }
         await this.db.dbUsers('user_tokens').update({
             accessed_at: Helpers.now(),
             last_ip: userHost,

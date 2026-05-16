@@ -6,8 +6,11 @@
  *
  * Example requests:
  * /httpapi?command=sendmessage&networkid=1&target=%23channel&message=a+reply+to+your+message
+ * /httpapi?command=recentbuffers&limit=20&offset=0&days=90
  * /httpapi?command=logout
  */
+
+const mysql = require('mysql');
 
 module.exports.init = async function init(hooks, app) {
     hooks.on('available_isupports', async event => {
@@ -91,6 +94,42 @@ class CommandError extends Error {
   }
 
 const apiCommands = Object.create(null);
+let messagesPool = null;
+
+function getMessagesPool(app) {
+    if (messagesPool) {
+        return messagesPool;
+    }
+
+    const storeConf = app.conf.get('message_store_mariadb', {});
+    const dsn = storeConf.messages_dsn || storeConf.dsn || storeConf.message_dsn || '';
+    if (!dsn) {
+        return null;
+    }
+
+    const url = new URL(dsn);
+    messagesPool = mysql.createPool({
+        host: url.hostname,
+        port: url.port || 3306,
+        user: decodeURIComponent(url.username || ''),
+        password: decodeURIComponent(url.password || ''),
+        database: url.pathname.replace(/^\//, ''),
+    });
+    return messagesPool;
+}
+
+function query(pool, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        pool.query(sql, params, (err, rows) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            resolve(rows);
+        });
+    });
+}
+
 apiCommands.logout = async (args, {user, app, token, hooks}) => {
     await app.userDb.removeUserToken(user.id, token);
     await hooks.emit('httpapi_command_logout', { user, token, args })
@@ -113,4 +152,100 @@ apiCommands.sendmessage = async (args, {user, app, token, hooks}) => {
 
     con.writeLine('PRIVMSG', args.target, args.message);
     return { sent: true };
+};
+
+apiCommands.messages = async (args, {user, app}) => {
+    const pool = getMessagesPool(app);
+    if (!pool) {
+        throw new CommandError('no_messages_store', 'Messages store not configured');
+    }
+
+    const buffer = (args.buffer || '').trim();
+    if (!buffer) {
+        throw new CommandError('missing_buffer', 'Buffer name is required');
+    }
+
+    const limit = Math.min(Math.max(parseInt(args.limit || '50', 10) || 50, 1), 200);
+    const before = args.before ? parseInt(args.before, 10) : null;
+
+    // Query messages for this buffer
+    // type: 1=PRIVMSG, 2=NOTICE
+    // prefix format: "nick!user@host"
+    // TODO: tier-based limits can be added here for paid upgrade feature
+    let sql = `SELECT time, type, prefix, data
+         FROM messages
+         WHERE user_id = ? AND buffer_lower = LOWER(?)`;
+    const params = [user.id, buffer];
+
+    if (before) {
+        sql += ` AND time < ?`;
+        params.push(before);
+    }
+
+    sql += ` ORDER BY time DESC LIMIT ?`;
+    params.push(limit);
+
+    const rows = await query(pool, sql, params);
+
+    // Parse prefix to extract nick, transform type to string
+    const messages = rows.map(row => {
+        const prefixMatch = (row.prefix || '').match(/^([^!]+)/);
+        const nick = prefixMatch ? prefixMatch[1] : '';
+        return {
+            time: row.time,
+            type: row.type === 1 ? 'privmsg' : row.type === 2 ? 'notice' : 'unknown',
+            nick: nick,
+            message: row.data || '',
+        };
+    });
+
+    // Return in chronological order (oldest first)
+    return { messages: messages.reverse(), meta: { buffer, limit, before } };
+};
+
+apiCommands.recentbuffers = async (args, {user, app}) => {
+    const pool = getMessagesPool(app);
+    if (!pool) {
+        throw new CommandError('no_messages_store', 'Messages store not configured');
+    }
+
+    const storeConf = app.conf.get('message_store_mariadb', {});
+    const defaultDays = parseInt(storeConf.recentbuffers_days, 10) || 90;
+    const defaultLimit = parseInt(storeConf.recentbuffers_limit, 10) || 20;
+
+    const search = (args.search || '').trim().toLowerCase();
+    // When searching, don't apply days limit - search full history
+    // Days limit only applies to "recent buffers" browsing (no search term)
+    const days = search ? 0 : Math.max(parseInt(args.days || defaultDays, 10) || defaultDays, 1);
+    const limit = Math.min(Math.max(parseInt(args.limit || defaultLimit, 10) || defaultLimit, 1), 200);
+    const offset = Math.max(parseInt(args.offset || '0', 10) || 0, 0);
+
+    // Build query
+    // TODO: tier-based limits can be added here for paid upgrade feature
+    let sql = `SELECT buffer, buffer_lower, MAX(time) AS last_time, COUNT(*) AS message_count
+         FROM messages
+         WHERE user_id = ?`;
+    const params = [user.id];
+
+    // Only apply time filter when not searching (browsing recent buffers)
+    if (days > 0) {
+        const since = Date.now() - (days * 24 * 60 * 60 * 1000);
+        sql += ` AND time >= ?`;
+        params.push(since);
+    }
+
+    if (search) {
+        // Search on LOWER(buffer) for reliability - buffer_lower may have different normalization
+        sql += ` AND LOWER(buffer) LIKE ?`;
+        params.push('%' + search + '%');
+    }
+
+    sql += ` GROUP BY buffer, buffer_lower
+         ORDER BY last_time DESC
+         LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = await query(pool, sql, params);
+
+    return { buffers: rows, meta: { limit, offset, days: days || 'all', search: search || undefined } };
 };
