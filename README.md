@@ -45,7 +45,7 @@ The RelayOS image uses the in-repo [Dockerfile](./Dockerfile) and [docker-entryp
 - `HOME=/data`
 - `KIWIBNC_DATA_DIR=/data`
 - first boot bootstraps the persisted KiwiBNC home/config if it is missing
-- startup can seed the RelayOS admin account and apply RelayOS-specific OAuth and public webchat config
+- startup applies RelayOS-specific OAuth and public webchat config
 
 For deploys, downstream stack config should treat `ghcr.io/relayos/kiwibnc` as the canonical image source and mount `/data` persistently.
 
