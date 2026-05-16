@@ -53,4 +53,22 @@ describe('config environment overrides', () => {
         expect(config.get('database').users).toBe('mysql://kiwibnc:secret@db.example:3306/wordpress');
         expect(config.get('database').table_prefix).toBe('bnc_');
     });
+
+    test('adds nested BNC environment overrides missing from config file', () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-config-'));
+        const configPath = path.join(tmpDir, 'config.ini');
+        fs.writeFileSync(configPath, [
+            '[database]',
+            'users="./users.db"',
+            'crypt_key="local-crypt-key"',
+            '',
+        ].join('\n'));
+
+        process.env.BNC_DATABASE_TABLE_PREFIX = 'bnc_';
+
+        const config = new Config(configPath);
+        config.load();
+
+        expect(config.get('database').table_prefix).toBe('bnc_');
+    });
 });

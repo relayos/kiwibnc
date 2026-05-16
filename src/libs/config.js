@@ -66,6 +66,18 @@ module.exports = class Config extends EventEmitter {
                 }
             }
 
+            let envPrefix = 'BNC_' + key.toUpperCase().replace(/\./g, '_') + '_';
+            for (let envName in process.env) {
+                if (!envName.startsWith(envPrefix)) {
+                    continue;
+                }
+
+                let prop = envName.slice(envPrefix.length).toLowerCase();
+                if (prop && typeof val[prop] === 'undefined') {
+                    val[prop] = this.parseEnvValue(process.env[envName]);
+                }
+            }
+
             return val;
         } else if (typeof val !== 'undefined') {
             return val;
