@@ -8,6 +8,68 @@ const USER_DB_TABLES = new Set([
     'user_tokens',
 ]);
 
+function decodeConnectionPart(value) {
+    return decodeURIComponent(value.replace(/\+/g, '%20'));
+}
+
+function parseMysqlConnectionString(connectionString) {
+    const scheme = 'mysql://';
+    const withoutScheme = connectionString.slice(scheme.length);
+    const authEnd = withoutScheme.lastIndexOf('@');
+    if (authEnd === -1) {
+        throw new Error('Invalid mysql connection string: missing credentials');
+    }
+
+    const auth = withoutScheme.slice(0, authEnd);
+    const hostPath = withoutScheme.slice(authEnd + 1);
+    const userEnd = auth.indexOf(':');
+    if (userEnd === -1) {
+        throw new Error('Invalid mysql connection string: missing password');
+    }
+
+    const slash = hostPath.indexOf('/');
+    const hostPort = slash === -1 ? hostPath : hostPath.slice(0, slash);
+    const databaseAndQuery = slash === -1 ? '' : hostPath.slice(slash + 1);
+    const queryStart = databaseAndQuery.indexOf('?');
+    const database = queryStart === -1 ?
+        databaseAndQuery :
+        databaseAndQuery.slice(0, queryStart);
+    const query = queryStart === -1 ? '' : databaseAndQuery.slice(queryStart + 1);
+
+    let host = hostPort;
+    let port;
+    if (hostPort.startsWith('[')) {
+        const hostEnd = hostPort.indexOf(']');
+        host = hostEnd === -1 ? hostPort : hostPort.slice(1, hostEnd);
+        if (hostEnd !== -1 && hostPort[hostEnd + 1] === ':') {
+            port = Number(hostPort.slice(hostEnd + 2));
+        }
+    } else {
+        const portStart = hostPort.lastIndexOf(':');
+        if (portStart !== -1) {
+            host = hostPort.slice(0, portStart);
+            port = Number(hostPort.slice(portStart + 1));
+        }
+    }
+
+    const connection = {
+        host: decodeConnectionPart(host),
+        user: decodeConnectionPart(auth.slice(0, userEnd)),
+        password: decodeConnectionPart(auth.slice(userEnd + 1)),
+        database: decodeConnectionPart(database),
+    };
+    if (port) {
+        connection.port = port;
+    }
+
+    const params = new URLSearchParams(query);
+    if (params.has('charset')) {
+        connection.charset = params.get('charset');
+    }
+
+    return connection;
+}
+
 module.exports = class Database {
     constructor(config) {
         let dbConf = config.get('database', {});
@@ -49,7 +111,7 @@ module.exports = class Database {
             // mysql://user:password@127.0.0.1:3306/database
             usersDbCon = {
                 client: 'mysql',
-                connection: usersConStr,
+                connection: parseMysqlConnectionString(usersConStr),
                 wrapIdentifier: wrapUserIdentifier,
                 acquireConnectionTimeout: 10000,
             };

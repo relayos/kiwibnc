@@ -49,4 +49,18 @@ describe('database configuration', () => {
 
         expect(db.userMigrationTableName).toBe('bnc_knex_migrations');
     });
+
+    test('parses mysql user dsn with raw slash password', () => {
+        const db = new Database(createConfig({
+            users: 'mysql://kiwibnc:raw/pass@db.example:3307/wordpress',
+            table_prefix: 'bnc_',
+        }));
+
+        const connection = db.dbUsers.client.config.connection;
+        expect(connection.host).toBe('db.example');
+        expect(connection.port).toBe(3307);
+        expect(connection.user).toBe('kiwibnc');
+        expect(connection.password).toBe('raw/pass');
+        expect(connection.database).toBe('wordpress');
+    });
 });
