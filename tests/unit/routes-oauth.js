@@ -126,7 +126,7 @@ describe('routes_oauth config', () => {
             userInfoUrl: 'https://users.s.getrelayos.com/oauth/me',
             scope: 'openid',
             provider: 'RelayOS',
-            allowRegistration: true,
+            allowRegistration: false,
             defaultNetwork: {
                 name: 'RelayOS',
                 host: 'inspircd',

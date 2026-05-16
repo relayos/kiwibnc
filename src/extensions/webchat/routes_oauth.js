@@ -71,7 +71,7 @@ function buildOauthConfig(app) {
         userInfoUrl,
         scope,
         provider: 'RelayOS',
-        allowRegistration: true,
+        allowRegistration: false,
         defaultNetwork: buildDefaultNetwork(webchat),
     };
 }
