@@ -179,7 +179,7 @@ class Users {
         return this.db.factories.User.query().where('username', 'LIKE', username).first();
     }
 
-    async addUser(username, password, isAdmin) {
+    async addUser(username, password, isAdmin, opts = {}) {
         if (!Helpers.validUsername(username)) {
             throw new Error('Invalid username');
         }
@@ -191,10 +191,19 @@ class Users {
         if (isAdmin === true) {
             user.admin = true;
         }
+        if (opts.wp_user_id) {
+            user.wp_user_id = opts.wp_user_id;
+        }
         await user.save();
 
         return user;
     };
+
+    async setUserWordPressId(userId, wpUserId) {
+        await this.db.dbUsers('users')
+            .where('id', userId)
+            .update({ wp_user_id: wpUserId });
+    }
 
     async deleteUser(user_id) {
         await this.db.factories.User.query().where('id', user_id).delete();

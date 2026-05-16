@@ -172,10 +172,22 @@ describe('routes_oauth config', () => {
 describe('routes_oauth wordpress identity resolution', () => {
     test('resolveWordPressIdentity returns user_login as the local username', () => {
         expect(__testHooks.resolveWordPressIdentity({
+            ID: 5230,
             user_login: 'allenday',
             email: 'ops@getrelayos.com',
         })).toEqual({
             username: 'allenday',
+            wpUserId: 5230,
+        });
+    });
+
+    test('resolveWordPressIdentity accepts lowercase id from provider responses', () => {
+        expect(__testHooks.resolveWordPressIdentity({
+            id: '5231',
+            user_login: 'lowerid',
+        })).toEqual({
+            username: 'lowerid',
+            wpUserId: 5231,
         });
     });
 
@@ -183,6 +195,12 @@ describe('routes_oauth wordpress identity resolution', () => {
         expect(() =>
             __testHooks.resolveWordPressIdentity({ email: 'ops@getrelayos.com' })
         ).toThrow('OAuth userinfo missing user_login');
+    });
+
+    test('resolveWordPressIdentity rejects missing wordpress user id', () => {
+        expect(() =>
+            __testHooks.resolveWordPressIdentity({ user_login: 'allenday' })
+        ).toThrow('OAuth userinfo missing WordPress user id');
     });
 
     test('resolveWordPressIdentity rejects invalid BNC username', () => {
@@ -211,7 +229,10 @@ describe('routes_oauth local account resolution', () => {
             },
         };
 
-        await expect(__testHooks.ensureOAuthUser(app, 'allenday', defaultNetwork)).resolves.toBe(user);
+        await expect(__testHooks.ensureOAuthUser(app, {
+            username: 'allenday',
+            wpUserId: 5230,
+        }, defaultNetwork)).resolves.toBe(user);
 
         expect(app.userDb.getUser).toHaveBeenCalledWith('allenday');
         expect(app.userDb.getNetworkByName).toHaveBeenCalledWith(7, 'RelayOS');
@@ -238,12 +259,16 @@ describe('routes_oauth local account resolution', () => {
             },
         };
 
-        await expect(__testHooks.ensureOAuthUser(app, 'newuser', defaultNetwork)).resolves.toBe(created);
+        await expect(__testHooks.ensureOAuthUser(app, {
+            username: 'newuser',
+            wpUserId: 1234,
+        }, defaultNetwork)).resolves.toBe(created);
 
         expect(app.userDb.addUser).toHaveBeenCalledWith(
             'newuser',
             expect.stringMatching(/^oauth-unusable-/),
-            false
+            false,
+            { wp_user_id: 1234 }
         );
         expect(app.userDb.addNetwork).toHaveBeenCalledWith(9, {
             name: 'RelayOS',
@@ -268,7 +293,10 @@ describe('routes_oauth local account resolution', () => {
             },
         };
 
-        await expect(__testHooks.ensureOAuthUser(app, 'relayosqa_manual', defaultNetwork)).resolves.toBe(created);
+        await expect(__testHooks.ensureOAuthUser(app, {
+            username: 'relayosqa_manual',
+            wpUserId: 5230,
+        }, defaultNetwork)).resolves.toBe(created);
 
         expect(app.userDb.getNetworkByName).toHaveBeenCalledWith(5230, 'RelayOS');
         expect(app.userDb.addNetwork).toHaveBeenCalledWith(5230, expect.objectContaining({
@@ -279,18 +307,42 @@ describe('routes_oauth local account resolution', () => {
     });
 
     test('ensureOAuthUser does not seed network when default network already exists', async () => {
-        const user = { id: 7, username: 'allenday' };
+        const user = { id: 7, username: 'allenday', wp_user_id: 99 };
         const app = {
             userDb: {
                 getUser: jest.fn().mockResolvedValue(user),
+                setUserWordPressId: jest.fn(),
                 getNetworkByName: jest.fn().mockResolvedValue({ name: 'RelayOS' }),
                 addNetwork: jest.fn(),
             },
         };
 
-        await expect(__testHooks.ensureOAuthUser(app, 'allenday', defaultNetwork)).resolves.toBe(user);
+        await expect(__testHooks.ensureOAuthUser(app, {
+            username: 'allenday',
+            wpUserId: 99,
+        }, defaultNetwork)).resolves.toBe(user);
 
+        expect(app.userDb.setUserWordPressId).not.toHaveBeenCalled();
         expect(app.userDb.addNetwork).not.toHaveBeenCalled();
+    });
+
+    test('ensureOAuthUser backfills wordpress id on an existing local user', async () => {
+        const user = { id: 7, username: 'allenday', wp_user_id: null };
+        const app = {
+            userDb: {
+                getUser: jest.fn().mockResolvedValue(user),
+                setUserWordPressId: jest.fn().mockResolvedValue(),
+                getNetworkByName: jest.fn().mockResolvedValue({ name: 'RelayOS' }),
+                addNetwork: jest.fn(),
+            },
+        };
+
+        await expect(__testHooks.ensureOAuthUser(app, {
+            username: 'allenday',
+            wpUserId: 5230,
+        }, defaultNetwork)).resolves.toBe(user);
+
+        expect(app.userDb.setUserWordPressId).toHaveBeenCalledWith(7, 5230);
     });
 });
 
@@ -317,7 +369,7 @@ describe('routes_oauth callback route', () => {
 
         const httpsMock = makeHttpsRequestSequence([
             { body: JSON.stringify({ access_token: 'access-123' }) },
-            { body: JSON.stringify({ user_login: 'allenday', email: 'ops@getrelayos.com' }) },
+            { body: JSON.stringify({ ID: 5230, user_login: 'allenday', email: 'ops@getrelayos.com' }) },
         ]);
 
         const ctx = {
@@ -375,7 +427,7 @@ describe('routes_oauth callback route', () => {
 
         const httpsMock = makeHttpsRequestSequence([
             { body: JSON.stringify({ access_token: 'access-456' }) },
-            { body: JSON.stringify({ user_login: 'newuser' }) },
+            { body: JSON.stringify({ ID: 5231, user_login: 'newuser' }) },
         ]);
 
         const ctx = {
@@ -392,7 +444,8 @@ describe('routes_oauth callback route', () => {
         expect(app.userDb.addUser).toHaveBeenCalledWith(
             'newuser',
             expect.stringMatching(/^oauth-unusable-/),
-            false
+            false,
+            { wp_user_id: 5231 }
         );
         expect(app.userDb.addNetwork).toHaveBeenCalledWith(11, {
             name: 'RelayOS',
@@ -423,7 +476,7 @@ describe('routes_oauth callback route', () => {
 
         const httpsMock = makeHttpsRequestSequence([
             { body: JSON.stringify({ access_token: 'access-789' }) },
-            { body: JSON.stringify({ user_login: 'existing' }) },
+            { body: JSON.stringify({ ID: 5232, user_login: 'existing' }) },
         ]);
 
         const ctx = {

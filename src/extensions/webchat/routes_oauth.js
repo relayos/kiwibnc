@@ -208,8 +208,15 @@ function resolveWordPressIdentity(userInfo) {
         throw new Error('OAuth user_login is not a valid BNC username');
     }
 
+    const rawWpUserId = userInfo.ID || userInfo.id || userInfo.sub;
+    const wpUserId = Number(rawWpUserId);
+    if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
+        throw new Error('OAuth userinfo missing WordPress user id');
+    }
+
     return {
         username,
+        wpUserId,
     };
 }
 
@@ -248,10 +255,16 @@ async function ensureDefaultNetwork(app, user, defaultNetwork) {
     await app.userDb.addNetwork(userId, buildUserNetwork(defaultNetwork, user.username));
 }
 
-async function ensureOAuthUser(app, username, defaultNetwork) {
+async function ensureOAuthUser(app, identity, defaultNetwork) {
+    const username = identity.username;
     let user = await app.userDb.getUser(username);
     if (!user) {
-        user = await app.userDb.addUser(username, generateUnusablePassword(), false);
+        user = await app.userDb.addUser(username, generateUnusablePassword(), false, {
+            wp_user_id: identity.wpUserId,
+        });
+    } else if (!user.wp_user_id && typeof app.userDb.setUserWordPressId === 'function') {
+        await app.userDb.setUserWordPressId(getUserId(user), identity.wpUserId);
+        user.wp_user_id = identity.wpUserId;
     }
 
     await ensureDefaultNetwork(app, user, defaultNetwork);
@@ -335,7 +348,7 @@ function registerRoutes(app) {
         let mappedUser;
         try {
             const identity = resolveWordPressIdentity(userInfo);
-            mappedUser = await ensureOAuthUser(app, identity.username, oauthConf.defaultNetwork);
+            mappedUser = await ensureOAuthUser(app, identity, oauthConf.defaultNetwork);
         } catch (err) {
             l.warn('OAuth rejected login:', err.message);
             return respondError(ctx, err.message);

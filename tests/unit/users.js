@@ -49,6 +49,38 @@ describe('worker users', () => {
         expect(saved).toHaveLength(1);
         expect(saved[0].channels).toBe('#lobby,#help');
     });
+
+    test('addUser persists wordpress user id when provided', async () => {
+        const saved = [];
+        const db = {
+            factories: {
+                User: jest.fn(() => ({
+                    save: jest.fn(function save() {
+                        saved.push(this);
+                    }),
+                })),
+            },
+        };
+        const users = new Users(db);
+
+        await users.addUser('wpuser', 'secret', false, { wp_user_id: 5230 });
+
+        expect(saved).toHaveLength(1);
+        expect(saved[0].wp_user_id).toBe(5230);
+    });
+
+    test('setUserWordPressId updates existing users', async () => {
+        const update = jest.fn();
+        const where = jest.fn(() => ({ update }));
+        const dbUsers = jest.fn(() => ({ where }));
+        const users = new Users({ dbUsers });
+
+        await users.setUserWordPressId(7, 5230);
+
+        expect(dbUsers).toHaveBeenCalledWith('users');
+        expect(where).toHaveBeenCalledWith('id', 7);
+        expect(update).toHaveBeenCalledWith({ wp_user_id: 5230 });
+    });
 });
 
 describe('database savable models', () => {
