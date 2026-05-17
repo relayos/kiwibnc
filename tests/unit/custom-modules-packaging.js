@@ -13,6 +13,14 @@ describe('RelayBNC custom module packaging', () => {
         expect(gitmodules).toContain('url = https://github.com/relayos/custom-modules.git');
     });
 
+    test('runs validation on feature branch pushes while publishing only master', () => {
+        const woodpecker = fs.readFileSync(path.join(repoRoot, '.woodpecker.yml'), 'utf8');
+
+        expect(woodpecker).toContain('event: [push, pull_request]');
+        expect(woodpecker).not.toMatch(/^when:\n\s+- event: \[push, pull_request\]\n\s+branch: \[master\]/m);
+        expect(woodpecker).toMatch(/name: publish-image[\s\S]*branch: \[master\]/);
+    });
+
     test('copies KiwiBNC custom modules into the runtime source tree', () => {
         const dockerfile = fs.readFileSync(path.join(repoRoot, 'Dockerfile'), 'utf8');
 
