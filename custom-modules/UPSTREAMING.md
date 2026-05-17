@@ -45,11 +45,29 @@ Scope:
 - Table prefix support for KiwiBNC user tables and migration metadata.
 - Cross-driver inserted ID normalization.
 - Stale SQLite `users.db` retirement after successful SQL migrations.
-- Persisting configured network `channels` in `Users.addNetwork()`.
 
 Keep examples generic (`kiwibnc`, `ExampleNet`, `irc.example.test`). Do not
 include WordPress, OAuth, RelayOS, or `bnc_` as product policy beyond neutral
 table-prefix examples.
+
+### Persist Network Channels
+
+Branch name:
+
+- `upstreamable/persist-network-channels`
+
+Files:
+
+- `src/worker/users.js`
+- `tests/unit/users.js`
+
+Scope:
+
+- Persist configured network `channels` in `Users.addNetwork()` so seeded or
+  API-created networks preserve their initial channel list.
+
+This branch is intentionally separate from SQL user database support because it
+is a small data-model behavior fix with no SQL dependency.
 
 ## RelayBNC-Only Lanes
 
