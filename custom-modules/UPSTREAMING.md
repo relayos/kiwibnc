@@ -100,6 +100,8 @@ Scope:
 
 - Normalize insert IDs returned by different Knex clients, including SQLite
   scalar IDs and SQL clients that return objects with an `id` property.
+- Avoid calling Knex `.returning()` for MySQL-compatible clients that do not
+  support it and return insert IDs from `insert()` directly.
 
 This branch is intentionally separate from SQL user database support because it
 is useful for any non-SQLite driver and is a small compatibility fix.
