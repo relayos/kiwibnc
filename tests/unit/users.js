@@ -108,6 +108,17 @@ describe('database savable models', () => {
         expect(model.getData('id')).toBe(5230);
     });
 
+    test('does not call returning for mysql2 inserts', async () => {
+        const { db, returning } = createInsertDb('mysql2', [5230]);
+        const model = new TestSavable(db);
+
+        model.setData('username', 'testuser');
+        await model.save();
+
+        expect(returning).not.toHaveBeenCalled();
+        expect(model.getData('id')).toBe(5230);
+    });
+
     test('keeps returning for clients that support insert returning ids', async () => {
         const { db, returning } = createInsertDb('pg', [999], [{ id: 5230 }]);
         const model = new TestSavable(db);
