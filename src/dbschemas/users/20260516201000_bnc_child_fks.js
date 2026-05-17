@@ -18,6 +18,13 @@ async function addUserChildForeignKey(knex, tableName) {
     const usersTable = quotedIdentifier(knex, 'users');
     const constraintName = `${childTableName}_user_id_fk`;
 
+    await knex.raw(
+        `DELETE child
+           FROM ${childTable} child
+           LEFT JOIN ${usersTable} users ON users.id = child.user_id
+          WHERE child.user_id IS NULL OR users.id IS NULL`
+    );
+
     await knex.raw(`ALTER TABLE ${childTable} MODIFY COLUMN user_id INT(10) UNSIGNED NOT NULL`);
 
     const constraints = await knex.raw(
