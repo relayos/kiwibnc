@@ -84,13 +84,11 @@ describe('config environment overrides', () => {
             '# database intentionally omitted so custom store owns reads',
             'custom=""',
             '',
-            '[message_store_mariadb]',
-            'messages_table="bnc_messages"',
-            '',
         ].join('\n'));
 
         process.env.BNC_LOGGING_CUSTOM = '/app/src/worker/messagestores/mariadb.js';
         process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_DSN = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+        process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_TABLE = 'bnc_messages';
 
         const config = new Config(configPath);
         config.load();

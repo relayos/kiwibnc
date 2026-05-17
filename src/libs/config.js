@@ -57,6 +57,21 @@ module.exports = class Config extends EventEmitter {
         }
 
         let val = _.get(this.c, key);
+        if (typeof val === 'undefined') {
+            let envPrefix = 'BNC_' + key.toUpperCase().replace(/\./g, '_') + '_';
+            for (let envName in process.env) {
+                if (!envName.startsWith(envPrefix)) {
+                    continue;
+                }
+
+                val = val || {};
+                let prop = envName.slice(envPrefix.length).toLowerCase();
+                if (prop) {
+                    val[prop] = this.parseEnvValue(process.env[envName]);
+                }
+            }
+        }
+
         if (typeof val === 'object') {
             // Replace any property values if there is an environment var overriding it
             for (let prop in val) {

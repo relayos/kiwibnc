@@ -80,15 +80,15 @@ describe('RelayBNC custom module packaging', () => {
         }
     });
 
-    test('template disables sqlite message logging for custom message store ownership', () => {
+    test('keeps RelayOS message-store defaults out of core config template', () => {
         const template = fs.readFileSync(
             path.join(repoRoot, 'src/configProfileTemplate/config.ini'),
             'utf8'
         );
 
-        expect(template).not.toMatch(/^database="\.\/messages\.db"$/m);
-        expect(template).toContain('#database="./messages.db"');
-        expect(template).toContain('[message_store_mariadb]');
-        expect(template).toContain('messages_table="bnc_messages"');
+        expect(template).toMatch(/^public_register = true$/m);
+        expect(template).toMatch(/^database="\.\/messages\.db"$/m);
+        expect(template).not.toContain('[message_store_mariadb]');
+        expect(template).not.toContain('messages_table="bnc_messages"');
     });
 });
