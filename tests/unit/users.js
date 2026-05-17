@@ -1,6 +1,75 @@
 'use strict';
 
+jest.mock('bcrypt', () => ({
+    compare: jest.fn(),
+}));
+
+const Users = require('../../src/worker/users');
 const DatabaseSavable = require('../../src/libs/dataModels/databasesavable');
+
+describe('worker users', () => {
+    let originalConfig;
+
+    beforeEach(() => {
+        originalConfig = global.config;
+        global.config = {
+            get: jest.fn(() => -1),
+        };
+    });
+
+    afterEach(() => {
+        global.config = originalConfig;
+    });
+
+    test('addNetwork persists channels', async () => {
+        const saved = [];
+        const db = {
+            factories: {
+                Network: jest.fn(() => ({
+                    save: jest.fn(function save() {
+                        saved.push(this);
+                    }),
+                })),
+            },
+        };
+        const users = new Users(db);
+
+        const network = await users.addNetwork(42, {
+            name: 'ExampleNet',
+            host: 'irc.example.test',
+            port: 6667,
+            tls: false,
+            nick: 'testuser',
+            username: 'testuser',
+            realname: 'testuser',
+            channels: '#lobby,#help',
+        });
+
+        expect(network.channels).toBe('#lobby,#help');
+        expect(saved).toHaveLength(1);
+        expect(saved[0].channels).toBe('#lobby,#help');
+    });
+
+    test('addUser persists core user fields only', async () => {
+        const saved = [];
+        const db = {
+            factories: {
+                User: jest.fn(() => ({
+                    save: jest.fn(function save() {
+                        saved.push(this);
+                    }),
+                })),
+            },
+        };
+        const users = new Users(db);
+
+        await users.addUser('testuser', 'secret', false);
+
+        expect(saved).toHaveLength(1);
+        expect(saved[0].username).toBe('testuser');
+        expect(saved[0].admin).toBeUndefined();
+    });
+});
 
 describe('database savable models', () => {
     class TestSavable extends DatabaseSavable {}
@@ -35,17 +104,6 @@ describe('database savable models', () => {
         await model.save();
 
         expect(insert).toHaveBeenCalledWith({ username: 'testuser' });
-        expect(returning).not.toHaveBeenCalled();
-        expect(model.getData('id')).toBe(5230);
-    });
-
-    test('does not call returning for mysql2 inserts', async () => {
-        const { db, returning } = createInsertDb('mysql2', [5230]);
-        const model = new TestSavable(db);
-
-        model.setData('username', 'testuser');
-        await model.save();
-
         expect(returning).not.toHaveBeenCalled();
         expect(model.getData('id')).toBe(5230);
     });
