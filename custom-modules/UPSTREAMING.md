@@ -35,20 +35,36 @@ Branch name:
 Files:
 
 - `src/libs/database.js`
-- `src/libs/dataModels/databasesavable.js`
 - `tests/unit/database.js`
-- `tests/unit/users.js`
 
 Scope:
 
 - MySQL/MariaDB user DB DSN parsing.
 - Table prefix support for KiwiBNC user tables and migration metadata.
-- Cross-driver inserted ID normalization.
 - Stale SQLite `users.db` retirement after successful SQL migrations.
 
 Keep examples generic (`kiwibnc`, `ExampleNet`, `irc.example.test`). Do not
 include WordPress, OAuth, RelayOS, or `bnc_` as product policy beyond neutral
 table-prefix examples.
+
+### Normalize Inserted IDs
+
+Branch name:
+
+- `upstreamable/normalize-inserted-ids`
+
+Files:
+
+- `src/libs/dataModels/databasesavable.js`
+- `tests/unit/users.js`
+
+Scope:
+
+- Normalize insert IDs returned by different Knex clients, including SQLite
+  scalar IDs and SQL clients that return objects with an `id` property.
+
+This branch is intentionally separate from SQL user database support because it
+is useful for any non-SQLite driver and is a small compatibility fix.
 
 ### Persist Network Channels
 
