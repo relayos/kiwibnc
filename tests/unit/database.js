@@ -4,10 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const Database = require('../../src/libs/database');
-const Config = require('../../src/libs/config');
 
-function createConfig(database, baseDir = '') {
-    return {
+function createConfig(database, baseDir = '', configuredDatabase = undefined) {
+    const config = {
         get(key, def) {
             if (key === 'database') {
                 return database;
@@ -21,6 +20,10 @@ function createConfig(database, baseDir = '') {
             return path.join(baseDir, filePath);
         },
     };
+    if (typeof configuredDatabase !== 'undefined') {
+        config.c = { database: configuredDatabase };
+    }
+    return config;
 }
 
 describe('database configuration', () => {
@@ -193,19 +196,14 @@ describe('database configuration', () => {
 
     test('archives stale users.db when env override changes config from sqlite to mysql', async () => {
         const tmpDir = makeTmpDir();
-        const configPath = path.join(tmpDir, 'config.ini');
         const usersDb = path.join(tmpDir, 'users.db');
-        fs.writeFileSync(configPath, [
-            '[database]',
-            'users="./users.db"',
-            '',
-        ].join('\n'));
         fs.writeFileSync(usersDb, 'env overridden sqlite user data');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
-        const config = new Config(configPath);
-        config.load();
-        const db = new Database(config);
+        const db = new Database(createConfig(
+            { users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc' },
+            tmpDir,
+            { users: './users.db' }
+        ));
         await runSuccessfulMigrations(db);
         await closeDb(db);
 
@@ -219,19 +217,14 @@ describe('database configuration', () => {
 
     test('does not archive stale users.db before mysql migrations succeed', async () => {
         const tmpDir = makeTmpDir();
-        const configPath = path.join(tmpDir, 'config.ini');
         const usersDb = path.join(tmpDir, 'users.db');
-        fs.writeFileSync(configPath, [
-            '[database]',
-            'users="./users.db"',
-            '',
-        ].join('\n'));
         fs.writeFileSync(usersDb, 'must survive failed mysql startup');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
-        const config = new Config(configPath);
-        config.load();
-        const db = new Database(config);
+        const db = new Database(createConfig(
+            { users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc' },
+            tmpDir,
+            { users: './users.db' }
+        ));
         db.migrateConnections = jest.fn().mockResolvedValue([]);
         db.migrateUsers = jest.fn().mockRejectedValue(new Error('mysql unavailable'));
 
@@ -246,21 +239,16 @@ describe('database configuration', () => {
 
     test('archives configured non-default sqlite users path after env mysql override', async () => {
         const tmpDir = makeTmpDir();
-        const configPath = path.join(tmpDir, 'config.ini');
         const defaultUsersDb = path.join(tmpDir, 'users.db');
         const configuredUsersDb = path.join(tmpDir, 'staging-users.db');
-        fs.writeFileSync(configPath, [
-            '[database]',
-            'users="./staging-users.db"',
-            '',
-        ].join('\n'));
         fs.writeFileSync(defaultUsersDb, 'unrelated default sqlite file');
         fs.writeFileSync(configuredUsersDb, 'configured sqlite user data');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
-        const config = new Config(configPath);
-        config.load();
-        const db = new Database(config);
+        const db = new Database(createConfig(
+            { users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc' },
+            tmpDir,
+            { users: './staging-users.db' }
+        ));
         await runSuccessfulMigrations(db);
         await closeDb(db);
 
@@ -276,19 +264,14 @@ describe('database configuration', () => {
 
     test('archives implicit default users.db after env mysql override', async () => {
         const tmpDir = makeTmpDir();
-        const configPath = path.join(tmpDir, 'config.ini');
         const usersDb = path.join(tmpDir, 'users.db');
-        fs.writeFileSync(configPath, [
-            '[database]',
-            'state="./connections.db"',
-            '',
-        ].join('\n'));
         fs.writeFileSync(usersDb, 'implicit default sqlite user data');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
-        const config = new Config(configPath);
-        config.load();
-        const db = new Database(config);
+        const db = new Database(createConfig(
+            { users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc' },
+            tmpDir,
+            { state: './connections.db' }
+        ));
         await runSuccessfulMigrations(db);
         await closeDb(db);
 
