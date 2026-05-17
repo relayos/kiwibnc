@@ -13,7 +13,7 @@ steps:
     image: node:20-alpine
     commands:
       - npm ci
-      - ./node_modules/.bin/jest tests/unit/custom-modules-packaging.js tests/unit/docker-entrypoint.js tests/unit/users.js --runInBand
+      - ./node_modules/.bin/jest --runInBand
 
   - name: custom-modules-validation
     image: python:3.12-alpine
