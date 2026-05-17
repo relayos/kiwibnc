@@ -1,89 +1,11 @@
 const fs = require('fs-extra');
 const path = require('path');
+const { parseBindString } = require('../../libs/helpers');
 
-function isTemplatePlaceholder(value) {
-    return typeof value === 'string' && /^\{\{[^}]+\}\}$/.test(value.trim());
-}
-
-function resolveStartupValue(existing, fallback) {
-    if (existing === undefined || existing === null || existing === '') {
-        return fallback;
-    }
-
-    if (isTemplatePlaceholder(existing)) {
-        return fallback;
-    }
-
-    return existing;
-}
-
-function parsePublicTls(raw) {
-    if (raw === undefined || raw === null || raw === '') {
-        return null;
-    }
-
-    const value = String(raw).trim().toLowerCase();
-    if (['1', 'true', 'yes', 'on'].includes(value)) {
-        return true;
-    }
-    if (['0', 'false', 'no', 'off'].includes(value)) {
-        return false;
-    }
-
-    return null;
-}
-
-function buildPublicStartupOverrides() {
-    const host = process.env.KIWIBNC_PUBLIC_HOST || '';
-    const port = parseInt(process.env.KIWIBNC_PUBLIC_PORT || '', 10);
-    const tls = parsePublicTls(process.env.KIWIBNC_PUBLIC_TLS);
-    const directPath = process.env.KIWIBNC_PUBLIC_PATH || '';
-
-    if (!host && !Number.isFinite(port) && tls === null && !directPath) {
-        return null;
-    }
-
-    return {
-        server: host || '',
-        port: Number.isFinite(port) && port > 0 ? port : (tls ? 443 : 80),
-        tls: tls === null ? false : tls,
-        direct_path: directPath || '/',
-    };
-}
-
-function buildStartupOptions(ctx) {
-    const publicOverrides = buildPublicStartupOverrides();
-    if (publicOverrides) {
-        return publicOverrides;
-    }
-
-    const forwardedProto = ctx.headers && ctx.headers['x-forwarded-proto'];
-    const forwardedHost = ctx.headers && ctx.headers['x-forwarded-host'];
-    const forwardedPort = ctx.headers && ctx.headers['x-forwarded-port'];
-    const host = forwardedHost || ctx.host || ctx.hostname || '';
-    const protoValues = String(forwardedProto || ctx.protocol || '')
-        .split(',')
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean);
-    const isTls = protoValues.includes('https');
-    const portMatch = host.match(/:(\d+)$/);
-    const port = forwardedPort ?
-        parseInt(String(forwardedPort).split(',')[0].trim(), 10) :
-        (portMatch ? parseInt(portMatch[1], 10) : NaN);
-
-    return {
-        server: host.replace(/:\d+$/, '') || ctx.hostname || '',
-        port: Number.isFinite(port) && port > 0 ? port : (isTls ? 443 : 80),
-        tls: isTls,
-        direct_path: ctx.basePath || '/',
-    };
-}
-
-module.exports = function(app, oauthClientConf) {
+module.exports = function(app) {
     let router = app.webserver.router;
 
     let publicPath = app.conf.relativePath(app.conf.get('webserver.public_dir'));
-    const oauthEnabled = !!(oauthClientConf && oauthClientConf.login_url);
 
     router.get('kiwi.bnc_plugin', '/kiwibnc_plugin.html', async (ctx, next) => {
         ctx.body = await fs.readFile(
@@ -102,21 +24,17 @@ module.exports = function(app, oauthClientConf) {
             startupScreen: 'kiwibnc',
         };
 
-        const requestStartupOptions = buildStartupOptions(ctx);
         config.startupOptions = {
             ...config.startupOptions,
-            server: resolveStartupValue(config.startupOptions.server, requestStartupOptions.server),
-            port: resolveStartupValue(config.startupOptions.port, requestStartupOptions.port),
-            tls: resolveStartupValue(config.startupOptions.tls, requestStartupOptions.tls),
-            direct_path: resolveStartupValue(
-                config.startupOptions.direct_path,
-                requestStartupOptions.direct_path
-            ),
+            port: '{{port}}',
+            server: '{{hostname}}',
+            direct_path: '/',
+            tls: '{{tls}}',
             direct: true,
             channel: '',
             bouncer: true,
             remember_buffers: false,
-            public_register : oauthEnabled ? false : app.conf.get('webchat.public_register', false),
+            public_register : app.conf.get('webchat.public_register', false),
         };
 
         // Add our kiwi plugin to the config
@@ -127,28 +45,16 @@ module.exports = function(app, oauthClientConf) {
             basePath: ctx.basePath,
         });
 
-        if (oauthClientConf) {
-            config.oauth = oauthClientConf;
-        }
-
         let extraConf = app.conf.get('webchat');
         for (let prop in extraConf) {
             config[prop] = extraConf[prop];
-        }
-
-        config.startupOptions = config.startupOptions || {};
-        config.startupOptions.public_register = oauthEnabled ?
-            false :
-            app.conf.get('webchat.public_register', false);
-        if (oauthEnabled) {
-            config.oauth = oauthClientConf;
         }
 
         ctx.body = config;
     });
 
     app.webserver.router.post('kiwi.config', '/api/register', async (ctx, next) => {
-        if (oauthEnabled || !app.conf.get('webchat.public_register', false)) {
+        if (!app.conf.get('webchat.public_register', false)) {
             ctx.body = {error: 'forbidden'};
             return;
         }

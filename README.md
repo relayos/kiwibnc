@@ -45,9 +45,38 @@ The RelayOS image uses the in-repo [Dockerfile](./Dockerfile) and [docker-entryp
 - `HOME=/data`
 - `KIWIBNC_DATA_DIR=/data`
 - first boot bootstraps the persisted KiwiBNC home/config if it is missing
-- startup applies RelayOS-specific OAuth and public webchat config
+- startup loads RelayOS-specific OAuth and public webchat config from the
+  packaged `custom-modules` overlay
 
 For deploys, downstream stack config should treat `ghcr.io/relayos/kiwibnc` as the canonical image source and mount `/data` persistently.
+
+### RelayBNC fork reduction
+
+RelayBNC should stay as close to upstream KiwiBNC as practical. RelayOS-owned
+behavior should move into `custom-modules/kiwibnc` when KiwiBNC already exposes
+a clean extension seam. This branch carries a CI-safe snapshot of the
+KiwiBNC-specific `custom-modules/kiwibnc` overlay and copies that tree into
+`/app/src` so modules can be packaged without adding more core source
+divergence or requiring private cross-repo checkout during Woodpecker clone.
+
+Current extraction status:
+
+- Already factored: MariaDB message history storage lives in
+  `custom-modules/kiwibnc/worker/messagestores/mariadb.js` and is enabled
+  through `logging.custom`.
+- Already factored: RelayOS OAuth routes, WordPress identity binding policy,
+  OAuth-created default network handling, and webchat login/registration policy
+  live in the `custom-modules/kiwibnc/extensions/webchat` overlay.
+- Keep in core for now: MySQL/MariaDB user DB support, table prefixes, DSN
+  parsing, `wp_user_id`, user/network/token FK migrations, inserted-ID
+  normalization, and stale `users.db` retirement. These are DB/model seams and
+  should move only after a migration/plugin contract exists.
+- Move next: reduce DB/model divergence once KiwiBNC has stable migration and
+  user-store plugin contracts.
+
+When the module seams are proven, the intended cleanup path is to rewrite or
+rebase the fork history onto upstream KiwiBNC and cherry-pick only the generic
+core support that cannot live in `custom-modules`.
 
 ## Usage
 Running KiwiBNC for the first time will auto generate a config file in your home directory. You can also create your own using [this](https://github.com/kiwiirc/kiwibnc/blob/master/src/configProfileTemplate/config.ini) as a template and passing `--config=/path/to/config.ini` when running.
