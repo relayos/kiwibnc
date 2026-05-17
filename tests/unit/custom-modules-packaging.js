@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+const webchatDir = path.join(repoRoot, 'src/extensions/webchat');
 
 describe('RelayBNC custom module packaging', () => {
     test('tracks relayos custom-modules as a submodule', () => {
@@ -17,6 +18,27 @@ describe('RelayBNC custom module packaging', () => {
 
         expect(dockerfile).toContain('COPY custom-modules/kiwibnc/ /app/src/');
         expect(dockerfile).toContain('/app/src/worker/messagestores/mariadb.js');
+    });
+
+    test('packages RelayOS webchat OAuth overlay in custom modules', () => {
+        const overlayDir = path.join(repoRoot, 'custom-modules/kiwibnc/extensions/webchat');
+
+        expect(fs.existsSync(path.join(overlayDir, 'routes_oauth.js'))).toBe(true);
+        expect(fs.existsSync(path.join(overlayDir, 'routes_client.js'))).toBe(true);
+        expect(fs.existsSync(path.join(overlayDir, 'index.js'))).toBe(true);
+        expect(fs.existsSync(path.join(overlayDir, 'kiwibnc_plugin.html'))).toBe(true);
+    });
+
+    test('keeps RelayOS OAuth webchat policy out of core source', () => {
+        const routesClient = fs.readFileSync(path.join(webchatDir, 'routes_client.js'), 'utf8');
+        const webchatIndex = fs.readFileSync(path.join(webchatDir, 'index.js'), 'utf8');
+        const pluginHtml = fs.readFileSync(path.join(webchatDir, 'kiwibnc_plugin.html'), 'utf8');
+
+        expect(fs.existsSync(path.join(webchatDir, 'routes_oauth.js'))).toBe(false);
+        expect(routesClient).not.toContain('oauthClientConf');
+        expect(routesClient).not.toContain('oauthEnabled');
+        expect(webchatIndex).not.toContain('routes_oauth');
+        expect(pluginHtml).not.toContain('kiwibnc_oauth_login');
     });
 
     test('template disables sqlite message logging for custom message store ownership', () => {

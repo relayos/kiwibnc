@@ -14,7 +14,12 @@ steps:
     image: node:20-alpine
     commands:
       - npm ci
-      - ./node_modules/.bin/jest tests/unit/custom-modules-packaging.js tests/unit/docker-entrypoint.js tests/unit/routes-client.js tests/unit/routes-oauth.js tests/unit/users.js --runInBand
+      - ./node_modules/.bin/jest tests/unit/custom-modules-packaging.js tests/unit/docker-entrypoint.js tests/unit/users.js --runInBand
+
+  - name: custom-modules-validation
+    image: python:3.12-alpine
+    commands:
+      - python3 -m unittest discover -s custom-modules/tests -p 'test_*.py' -v
 
   - name: test-build
     image: woodpeckerci/plugin-docker-buildx
