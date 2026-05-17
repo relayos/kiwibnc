@@ -60,6 +60,26 @@ describe('RelayBNC custom module packaging', () => {
         expect(pluginHtml).not.toContain('kiwibnc_oauth_login');
     });
 
+    test('keeps WordPress user linkage out of core source', () => {
+        const coreFiles = [
+            'src/libs/dataModels/user.js',
+            'src/worker/users.js',
+            'src/dbschemas/users/20260516190000_wordpress_user_fk.js',
+            'src/dbschemas/users/20260516201000_bnc_child_fks.js',
+        ];
+
+        for (const file of coreFiles) {
+            const fullPath = path.join(repoRoot, file);
+            if (!fs.existsSync(fullPath)) {
+                continue;
+            }
+
+            const text = fs.readFileSync(fullPath, 'utf8');
+            expect(text).not.toContain('wp_user_id');
+            expect(text).not.toContain('wp_users');
+        }
+    });
+
     test('template disables sqlite message logging for custom message store ownership', () => {
         const template = fs.readFileSync(
             path.join(repoRoot, 'src/configProfileTemplate/config.ini'),

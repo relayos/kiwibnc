@@ -9,15 +9,12 @@ a KiwiBNC image without carrying RelayOS product policy in the KiwiBNC core fork
 Recent `relayos/kiwibnc` work falls into three buckets:
 
 - Keep in the KiwiBNC fork for now: MySQL/MariaDB user database support, user
-  table prefixes, DSN parsing, inserted-ID normalization, `wp_user_id` model
-  support, WordPress FK migrations, stale `users.db` retirement, and default
-  OAuth network/channel persistence. These depend on KiwiBNC internals or active
-  migrations and should move only after clean generic hooks exist.
-- Move later: OAuth routes, webchat login UX, WordPress identity binding policy,
-  and RelayOS-specific registration behavior. These should become a RelayBNC
-  auth module after the core exposes stable seams for route registration, client
-  config injection, user mutation, and external migrations.
-- Move now: MariaDB message history storage. KiwiBNC already supports
+  table prefixes, DSN parsing, inserted-ID normalization, and stale `users.db`
+  retirement. These are generic deployment/runtime capabilities.
+- Moved here: OAuth routes, webchat login UX, WordPress identity binding
+  policy, WordPress FK/linkage schema, RelayOS-specific registration behavior,
+  and default OAuth network/channel persistence.
+- Moved here: MariaDB message history storage. KiwiBNC already supports
   `logging.custom`, so message persistence can live here without more divergence from upstream KiwiBNC.
 
 The target shape is a boring RelayBNC distro: upstream KiwiBNC plus a small

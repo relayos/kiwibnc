@@ -5,7 +5,12 @@ const path = require('path');
 const unzipper = require('unzipper');
 const routesAdmin = require('./routes_admin');
 const routesClient = require('./routes_client');
-const { registerRoutes: registerOauthRoutes, getClientConfig: getOauthClientConfig } = require('./routes_oauth');
+const {
+    registerRoutes: registerOauthRoutes,
+    getClientConfig: getOauthClientConfig,
+    buildOauthConfig,
+    ensureWordPressLinkage,
+} = require('./routes_oauth');
 
 module.exports.init = async function init(hooks, app) {
     if (!app.conf.get('webserver.enabled') || !app.conf.get('webserver.public_dir')) {
@@ -15,7 +20,11 @@ module.exports.init = async function init(hooks, app) {
 
     await downloadKiwiIrc(publicPath, app.conf.get('webchat.download_url', ''));
 
-    const oauthConf = registerOauthRoutes(app);
+    const oauthConf = buildOauthConfig(app);
+    if (oauthConf) {
+        await ensureWordPressLinkage(app);
+    }
+    registerOauthRoutes(app, oauthConf);
     const oauthClientConf = getOauthClientConfig(oauthConf);
 
     routesAdmin(app);

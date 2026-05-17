@@ -22,8 +22,7 @@ class KiwiBncMariaDbMessageStoreContractTests(unittest.TestCase):
         expected_snippets = [
             "Fork Split Findings",
             "Keep in the KiwiBNC fork for now",
-            "Move later",
-            "Move now",
+            "Moved here",
             "MariaDB message history storage",
             "`logging.custom`",
             "without more divergence from upstream KiwiBNC",

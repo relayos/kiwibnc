@@ -34,9 +34,6 @@ class User extends DatabaseSavable {
     get bind_host() { return this.getData('bind_host'); }
     set bind_host(newVal) { return this.setData('bind_host', newVal); }
 
-    get wp_user_id() { return this.getData('wp_user_id'); }
-    set wp_user_id(newVal) { return this.setData('wp_user_id', newVal); }
-
     checkPassword(password) {
         let hashed = this.password;
         return bcrypt.compareSync(password, hashed);

@@ -65,12 +65,11 @@ Current extraction status:
   `custom-modules/kiwibnc/worker/messagestores/mariadb.js` and is enabled
   through `logging.custom`.
 - Already factored: RelayOS OAuth routes, WordPress identity binding policy,
-  OAuth-created default network handling, and webchat login/registration policy
-  live in the `custom-modules/kiwibnc/extensions/webchat` overlay.
+  WordPress FK/linkage schema, OAuth-created default network handling, and
+  webchat login/registration policy live in the
+  `custom-modules/kiwibnc/extensions/webchat` overlay.
 - Keep in core for now: MySQL/MariaDB user DB support, table prefixes, DSN
-  parsing, `wp_user_id`, user/network/token FK migrations, inserted-ID
-  normalization, and stale `users.db` retirement. These are DB/model seams and
-  should move only after a migration/plugin contract exists.
+  parsing, inserted-ID normalization, and stale `users.db` retirement.
 - Move next: reduce DB/model divergence once KiwiBNC has stable migration and
   user-store plugin contracts.
 

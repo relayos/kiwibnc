@@ -28,6 +28,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*registerRoutes")
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*getClientConfig")
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*buildOauthConfig")
+        self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*ensureWordPressLinkage")
 
         expected_snippets = [
             "userInfo.user_login",
@@ -35,10 +36,19 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "OAuth user_login is not a valid BNC username",
             "wp_user_id",
             "identity.wpUserId",
-            "setUserWordPressId",
+            "ensureWordPressLinkage",
+            "wp_users",
+            "addUserChildForeignKey",
         ]
         for snippet in expected_snippets:
             self.assertIn(snippet, text)
+
+    def test_webchat_index_runs_wordpress_linkage_only_when_oauth_is_configured(self):
+        text = self.read_overlay("index.js")
+
+        self.assertIn("const oauthConf = buildOauthConfig(app)", text)
+        self.assertIn("if (oauthConf)", text)
+        self.assertIn("await ensureWordPressLinkage(app)", text)
 
     def test_routes_client_disables_public_registration_when_oauth_is_enabled(self):
         text = self.read_overlay("routes_client.js")
