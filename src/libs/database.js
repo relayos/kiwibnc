@@ -2,6 +2,13 @@ const path = require('path');
 const fs = require('fs');
 const knex = require('knex');
 
+const USER_DB_TABLES = new Set([
+    'connections',
+    'users',
+    'user_networks',
+    'user_tokens',
+]);
+
 function decodeConnectionPart(value) {
     return decodeURIComponent(value.replace(/\+/g, '%20'));
 }
@@ -139,7 +146,15 @@ module.exports = class Database {
             config.c.database.users :
             undefined;
         let dbConf = config.get('database', {});
+        let userTablePrefix = dbConf.table_prefix || '';
         this.staleUsersDbPath = null;
+        this.userMigrationTableName = `${userTablePrefix}knex_migrations`;
+        let wrapUserIdentifier = (value, origImpl) => {
+            let prefixedValue = USER_DB_TABLES.has(value) ?
+                `${userTablePrefix}${value}` :
+                value;
+            return origImpl(prefixedValue);
+        };
 
 		this.dbConnections = knex({
 			client: 'better-sqlite3',
@@ -161,6 +176,7 @@ module.exports = class Database {
             // postgres://someuser:somepassword@somehost:381/somedatabase
             usersDbCon.client = 'pg';
             usersDbCon.connection = usersConStr;
+            usersDbCon.wrapIdentifier = wrapUserIdentifier;
             let searchPathM = usersConStr.match(/searchPath=([^&]+)/);
             if (searchPathM) {
                 usersDbCon.searchPath = searchPathM[1].split(',');
@@ -171,6 +187,7 @@ module.exports = class Database {
             usersDbCon = {
                 client: 'mysql',
                 connection: parseMysqlConnectionString(usersConStr),
+                wrapIdentifier: wrapUserIdentifier,
                 acquireConnectionTimeout: 10000,
             };
         } else {
@@ -179,6 +196,7 @@ module.exports = class Database {
             usersDbCon.useNullAsDefault = true;
             usersDbCon.connection = { filename: config.relativePath(usersConStr) };
             usersDbCon.pool = { propagateCreateError: false };
+            usersDbCon.wrapIdentifier = wrapUserIdentifier;
         }
 
         this.dbUsers = knex(usersDbCon);
@@ -213,6 +231,7 @@ module.exports = class Database {
     migrateUsers() {
         return this.dbUsers.migrate.latest({
             directory: path.join(__dirname, '..', 'dbschemas', 'users'),
+            tableName: this.userMigrationTableName,
         });
     }
 

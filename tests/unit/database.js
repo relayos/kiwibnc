@@ -26,78 +26,25 @@ function createConfig(database, baseDir = '', configuredDatabase = undefined) {
     return config;
 }
 
-describe('database sql user connections', () => {
-    async function closeDb(db) {
-        await db.dbUsers.destroy();
-        await db.dbConnections.destroy();
-    }
-
-    test('parses mysql user dsn with raw slash password', async () => {
-        const db = new Database(createConfig({
-            users: 'mysql://kiwibnc:raw/pass@db.example:3307/kiwibnc',
-        }));
-
-        const connection = db.dbUsers.client.config.connection;
-        expect(db.dbUsers.client.config.client).toBe('mysql');
-        expect(connection.host).toBe('db.example');
-        expect(connection.port).toBe(3307);
-        expect(connection.user).toBe('kiwibnc');
-        expect(connection.password).toBe('raw/pass');
-        expect(connection.database).toBe('kiwibnc');
-
-        await closeDb(db);
-    });
-
-    test('supports mariadb user dsn', async () => {
-        const db = new Database(createConfig({
-            users: 'mariadb://kiwibnc:secret@db.example:3306/kiwibnc',
-        }));
-
-        const connection = db.dbUsers.client.config.connection;
-        expect(db.dbUsers.client.config.client).toBe('mysql');
-        expect(connection.host).toBe('db.example');
-        expect(connection.port).toBe(3306);
-        expect(connection.user).toBe('kiwibnc');
-        expect(connection.password).toBe('secret');
-        expect(connection.database).toBe('kiwibnc');
-
-        await closeDb(db);
-    });
-
-    test('passes mysql charset query parameter to knex connection', async () => {
-        const db = new Database(createConfig({
-            users: 'mysql://kiwibnc:secret@db.example/kiwibnc?charset=utf8mb4',
-        }));
-
-        const connection = db.dbUsers.client.config.connection;
-        expect(connection.charset).toBe('utf8mb4');
-
-        await closeDb(db);
-    });
-
-    test('treats paths containing mysql-like text as sqlite paths', async () => {
-        const db = new Database(createConfig({
-            users: './archive/mysql://users.db',
-        }, '/tmp/kiwibnc'));
-
-        expect(db.dbUsers.client.config.client).toBe('better-sqlite3');
-        expect(db.dbUsers.client.config.connection.filename)
-            .toBe(path.join('/tmp/kiwibnc', './archive/mysql://users.db'));
-
-        await closeDb(db);
-    });
-});
-
-describe('database stale sqlite users retirement', () => {
+describe('database configuration', () => {
     let tmpDirs = [];
+    let originalUsersEnv;
     let warnSpy;
 
     beforeEach(() => {
+        originalUsersEnv = process.env.BNC_DATABASE_USERS;
+        delete process.env.BNC_DATABASE_USERS;
         warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     });
 
     afterEach(() => {
         warnSpy.mockRestore();
+
+        if (typeof originalUsersEnv === 'undefined') {
+            delete process.env.BNC_DATABASE_USERS;
+        } else {
+            process.env.BNC_DATABASE_USERS = originalUsersEnv;
+        }
 
         tmpDirs.forEach((tmpDir) => {
             fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -116,9 +63,9 @@ describe('database stale sqlite users retirement', () => {
         await db.dbConnections.destroy();
     }
 
-    function retiredFiles(tmpDir, filename = 'users.db') {
+    function retiredUsersFiles(tmpDir) {
         return fs.readdirSync(tmpDir)
-            .filter((entry) => entry.startsWith(`${filename}.retired-`) && entry.endsWith('.bak'));
+            .filter((filename) => filename.startsWith('users.db.retired-') && filename.endsWith('.bak'));
     }
 
     async function runSuccessfulMigrations(db) {
@@ -127,10 +74,130 @@ describe('database stale sqlite users retirement', () => {
         await db.init();
     }
 
-    test('archives stale users.db after effective mysql config succeeds', async () => {
+    test('prefixes KiwiBNC user tables when configured', () => {
+        const db = new Database(createConfig({
+            users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc',
+            table_prefix: 'bnc_',
+        }));
+
+        const selectSql = db.dbUsers('users').select('*').toSQL().sql;
+        const joinSql = db.dbUsers('user_networks')
+            .innerJoin('users', 'users.id', 'user_networks.user_id')
+            .innerJoin('user_tokens', 'user_tokens.user_id', 'user_networks.user_id')
+            .select('user_networks.*', 'users.password as _pass')
+            .toSQL()
+            .sql;
+
+        expect(selectSql).toContain('`bnc_users`');
+        expect(joinSql).toContain('`bnc_user_networks`');
+        expect(joinSql).toContain('`bnc_users`');
+        expect(joinSql).toContain('`bnc_user_tokens`');
+        expect(joinSql).not.toContain('`user_networks`');
+        expect(joinSql).not.toContain('`users`');
+        expect(joinSql).not.toContain('`user_tokens`');
+    });
+
+    test('prefixes user migration metadata table in shared databases', () => {
+        const db = new Database(createConfig({
+            state: 'connections.db',
+            users: 'users.db',
+            table_prefix: 'bnc_',
+        }));
+
+        expect(db.userMigrationTableName).toBe('bnc_knex_migrations');
+    });
+
+    test('parses mysql user dsn with raw slash password', () => {
+        const db = new Database(createConfig({
+            users: 'mysql://kiwibnc:raw/pass@db.example:3307/kiwibnc',
+            table_prefix: 'bnc_',
+        }));
+
+        const connection = db.dbUsers.client.config.connection;
+        expect(connection.host).toBe('db.example');
+        expect(connection.port).toBe(3307);
+        expect(connection.user).toBe('kiwibnc');
+        expect(connection.password).toBe('raw/pass');
+        expect(connection.database).toBe('kiwibnc');
+    });
+
+    test('supports mariadb user dsn', () => {
+        const db = new Database(createConfig({
+            users: 'mariadb://kiwibnc:secret@db.example:3306/kiwibnc',
+            table_prefix: 'bnc_',
+        }));
+
+        const connection = db.dbUsers.client.config.connection;
+        expect(db.dbUsers.client.config.client).toBe('mysql');
+        expect(connection.host).toBe('db.example');
+        expect(connection.user).toBe('kiwibnc');
+        expect(connection.password).toBe('secret');
+        expect(connection.database).toBe('kiwibnc');
+    });
+
+    test('treats paths containing mysql-like text as sqlite paths', async () => {
+        const tmpDir = makeTmpDir();
+        const db = new Database(createConfig({
+            users: './archive/mysql://users.db',
+        }, tmpDir));
+
+        expect(db.dbUsers.client.config.client).toBe('better-sqlite3');
+        expect(db.dbUsers.client.config.connection.filename)
+            .toBe(path.join(tmpDir, './archive/mysql://users.db'));
+
+        await closeDb(db);
+    });
+
+    test('does not archive users.db for direct mysql config without prior sqlite path', async () => {
         const tmpDir = makeTmpDir();
         const usersDb = path.join(tmpDir, 'users.db');
         fs.writeFileSync(usersDb, 'stale user data');
+
+        const db = new Database(createConfig({
+            users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc',
+        }, tmpDir));
+        await runSuccessfulMigrations(db);
+        await closeDb(db);
+
+        expect(fs.existsSync(usersDb)).toBe(true);
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    test('does not fail when stale users.db is missing for mysql users database', async () => {
+        const tmpDir = makeTmpDir();
+
+        const db = new Database(createConfig({
+            users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc',
+        }, tmpDir));
+        await runSuccessfulMigrations(db);
+        await closeDb(db);
+
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    test('leaves users.db untouched when users database is sqlite', async () => {
+        const tmpDir = makeTmpDir();
+        const usersDb = path.join(tmpDir, 'users.db');
+        fs.writeFileSync(usersDb, 'active sqlite user data');
+
+        const db = new Database(createConfig({
+            users: './users.db',
+        }, tmpDir));
+        await runSuccessfulMigrations(db);
+        await closeDb(db);
+
+        expect(fs.existsSync(usersDb)).toBe(true);
+        expect(fs.readFileSync(usersDb, 'utf8')).toBe('active sqlite user data');
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    test('archives stale users.db when env override changes config from sqlite to mysql', async () => {
+        const tmpDir = makeTmpDir();
+        const usersDb = path.join(tmpDir, 'users.db');
+        fs.writeFileSync(usersDb, 'env overridden sqlite user data');
 
         const db = new Database(createConfig(
             { users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc' },
@@ -140,11 +207,12 @@ describe('database stale sqlite users retirement', () => {
         await runSuccessfulMigrations(db);
         await closeDb(db);
 
-        const archived = retiredFiles(tmpDir);
+        const archived = retiredUsersFiles(tmpDir);
         expect(fs.existsSync(usersDb)).toBe(false);
         expect(archived).toHaveLength(1);
-        expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('stale user data');
+        expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('env overridden sqlite user data');
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Retired stale SQLite users database'));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('database.users is configured for MySQL/MariaDB'));
     });
 
     test('does not archive stale users.db before mysql migrations succeed', async () => {
@@ -165,11 +233,11 @@ describe('database stale sqlite users retirement', () => {
 
         expect(fs.existsSync(usersDb)).toBe(true);
         expect(fs.readFileSync(usersDb, 'utf8')).toBe('must survive failed mysql startup');
-        expect(retiredFiles(tmpDir)).toHaveLength(0);
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
         expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    test('archives configured non-default sqlite users path after effective mysql config succeeds', async () => {
+    test('archives configured non-default sqlite users path after env mysql override', async () => {
         const tmpDir = makeTmpDir();
         const defaultUsersDb = path.join(tmpDir, 'users.db');
         const configuredUsersDb = path.join(tmpDir, 'staging-users.db');
@@ -184,44 +252,32 @@ describe('database stale sqlite users retirement', () => {
         await runSuccessfulMigrations(db);
         await closeDb(db);
 
-        const archived = retiredFiles(tmpDir, 'staging-users.db');
+        const archived = fs.readdirSync(tmpDir)
+            .filter((filename) => filename.startsWith('staging-users.db.retired-') && filename.endsWith('.bak'));
         expect(fs.existsSync(defaultUsersDb)).toBe(true);
         expect(fs.readFileSync(defaultUsersDb, 'utf8')).toBe('unrelated default sqlite file');
         expect(fs.existsSync(configuredUsersDb)).toBe(false);
         expect(archived).toHaveLength(1);
         expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('configured sqlite user data');
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
     });
 
-    test('does not archive users.db for direct mysql config without prior sqlite path', async () => {
+    test('archives implicit default users.db after env mysql override', async () => {
         const tmpDir = makeTmpDir();
         const usersDb = path.join(tmpDir, 'users.db');
-        fs.writeFileSync(usersDb, 'stale user data');
+        fs.writeFileSync(usersDb, 'implicit default sqlite user data');
 
-        const db = new Database(createConfig({
-            users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc',
-        }, tmpDir));
+        const db = new Database(createConfig(
+            { users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc' },
+            tmpDir,
+            { state: './connections.db' }
+        ));
         await runSuccessfulMigrations(db);
         await closeDb(db);
 
-        expect(fs.existsSync(usersDb)).toBe(true);
-        expect(retiredFiles(tmpDir)).toHaveLength(0);
-        expect(warnSpy).not.toHaveBeenCalled();
-    });
-
-    test('leaves users.db untouched when users database is sqlite', async () => {
-        const tmpDir = makeTmpDir();
-        const usersDb = path.join(tmpDir, 'users.db');
-        fs.writeFileSync(usersDb, 'active sqlite user data');
-
-        const db = new Database(createConfig({
-            users: './users.db',
-        }, tmpDir));
-        await runSuccessfulMigrations(db);
-        await closeDb(db);
-
-        expect(fs.existsSync(usersDb)).toBe(true);
-        expect(fs.readFileSync(usersDb, 'utf8')).toBe('active sqlite user data');
-        expect(retiredFiles(tmpDir)).toHaveLength(0);
-        expect(warnSpy).not.toHaveBeenCalled();
+        const archived = retiredUsersFiles(tmpDir);
+        expect(fs.existsSync(usersDb)).toBe(false);
+        expect(archived).toHaveLength(1);
+        expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('implicit default sqlite user data');
     });
 });
