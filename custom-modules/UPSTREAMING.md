@@ -40,12 +40,30 @@ Files:
 Scope:
 
 - MySQL/MariaDB user DB DSN parsing.
-- Table prefix support for KiwiBNC user tables and migration metadata.
 - Stale SQLite `users.db` retirement after successful SQL migrations.
 
 Keep examples generic (`kiwibnc`, `ExampleNet`, `irc.example.test`). Do not
 include WordPress, OAuth, RelayOS, or `bnc_` as product policy beyond neutral
 table-prefix examples.
+
+### User Table Prefixes
+
+Branch name:
+
+- `upstreamable/user-table-prefixes`
+
+Files:
+
+- `src/libs/database.js`
+- `tests/unit/database.js`
+
+Scope:
+
+- Prefix KiwiBNC user tables through Knex identifier wrapping.
+- Prefix user DB migration metadata table names for shared databases.
+
+This branch is intentionally separate from SQL user database support because it
+works for the existing SQLite user DB path and does not require SQL DSN parsing.
 
 ### Normalize Inserted IDs
 
