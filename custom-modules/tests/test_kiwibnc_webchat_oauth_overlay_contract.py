@@ -3,8 +3,9 @@ import unittest
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-WEBCHAT_ROOT = REPO_ROOT / "kiwibnc/extensions/webchat"
+MODULE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = MODULE_ROOT.parent
+WEBCHAT_ROOT = MODULE_ROOT / "kiwibnc/extensions/webchat"
 
 
 class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
@@ -20,7 +21,45 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "kiwibnc/extensions/webchat/routes_client.js",
             "kiwibnc/extensions/webchat/kiwibnc_plugin.html",
         ]:
-            self.assertTrue((REPO_ROOT / relpath).is_file(), relpath)
+            self.assertTrue((MODULE_ROOT / relpath).is_file(), relpath)
+
+    def test_oauth_webchat_policy_stays_out_of_core_source(self):
+        core_webchat_root = REPO_ROOT / "src/extensions/webchat"
+
+        self.assertFalse((core_webchat_root / "routes_oauth.js").exists())
+
+        core_files = [
+            core_webchat_root / "routes_client.js",
+            core_webchat_root / "index.js",
+            core_webchat_root / "kiwibnc_plugin.html",
+        ]
+        forbidden_snippets = [
+            "oauthClientConf",
+            "oauthEnabled",
+            "routes_oauth",
+            "kiwibnc_oauth_login",
+        ]
+        for path in core_files:
+            text = path.read_text()
+            for snippet in forbidden_snippets:
+                self.assertNotIn(snippet, text, f"{snippet} leaked into {path.relative_to(REPO_ROOT)}")
+
+    def test_wordpress_user_linkage_stays_out_of_core_source(self):
+        core_files = [
+            "src/libs/dataModels/user.js",
+            "src/worker/users.js",
+            "src/dbschemas/users/20260516190000_wordpress_user_fk.js",
+            "src/dbschemas/users/20260516201000_bnc_child_fks.js",
+        ]
+
+        for relpath in core_files:
+            path = REPO_ROOT / relpath
+            if not path.exists():
+                continue
+
+            text = path.read_text()
+            for snippet in ["wp_user_id", "wp_users"]:
+                self.assertNotIn(snippet, text, f"{snippet} leaked into {relpath}")
 
     def test_routes_oauth_exports_contract_and_maps_wordpress_identity(self):
         text = self.read_overlay("routes_oauth.js")
