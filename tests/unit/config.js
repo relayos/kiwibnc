@@ -10,10 +10,8 @@ describe('config environment overrides', () => {
         'BNC_DATABASE_CRYPT_KEY',
         'BNC_DATABASE_USERS',
         'BNC_DATABASE_TABLE_PREFIX',
-        'BNC_LOGGING_CUSTOM',
-        'BNC_LOGGING_DATABASE',
-        'BNC_MESSAGE_STORE_MARIADB_MESSAGES_DSN',
-        'BNC_MESSAGE_STORE_MARIADB_MESSAGES_TABLE',
+        'BNC_PLUGIN_EXAMPLE_ENDPOINT',
+        'BNC_PLUGIN_EXAMPLE_ENABLED',
     ];
     let originalEnv;
 
@@ -76,27 +74,23 @@ describe('config environment overrides', () => {
         expect(config.get('database').table_prefix).toBe('bnc_');
     });
 
-    test('allows env-only relaybnc mariadb message-store config', () => {
+    test('allows env-only nested section config', () => {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-config-'));
         const configPath = path.join(tmpDir, 'config.ini');
         fs.writeFileSync(configPath, [
-            '[logging]',
-            '# database intentionally omitted so custom store owns reads',
-            'custom=""',
+            '[webserver]',
+            'port=80',
             '',
         ].join('\n'));
 
-        process.env.BNC_LOGGING_CUSTOM = '/app/src/worker/messagestores/mariadb.js';
-        process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_DSN = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
-        process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_TABLE = 'bnc_messages';
+        process.env.BNC_PLUGIN_EXAMPLE_ENDPOINT = 'https://example.test/api';
+        process.env.BNC_PLUGIN_EXAMPLE_ENABLED = 'true';
 
         const config = new Config(configPath);
         config.load();
 
-        expect(config.get('logging').database).toBeUndefined();
-        expect(config.get('logging').custom).toBe('/app/src/worker/messagestores/mariadb.js');
-        expect(config.get('message_store_mariadb').messages_dsn)
-            .toBe('mysql://kiwibnc:secret@db.example:3306/kiwibnc');
-        expect(config.get('message_store_mariadb').messages_table).toBe('bnc_messages');
+        expect(config.get('webserver').port).toBe(80);
+        expect(config.get('plugin_example').endpoint).toBe('https://example.test/api');
+        expect(config.get('plugin_example').enabled).toBe('true');
     });
 });
