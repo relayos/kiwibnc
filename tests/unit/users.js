@@ -35,13 +35,13 @@ describe('worker users', () => {
         const users = new Users(db);
 
         const network = await users.addNetwork(42, {
-            name: 'RelayOS',
-            host: 'inspircd',
+            name: 'ExampleNet',
+            host: 'irc.example.test',
             port: 6667,
             tls: false,
-            nick: 'wpuser',
-            username: 'wpuser',
-            realname: 'wpuser',
+            nick: 'testuser',
+            username: 'testuser',
+            realname: 'testuser',
             channels: '#lobby,#help',
         });
 
@@ -63,10 +63,10 @@ describe('worker users', () => {
         };
         const users = new Users(db);
 
-        await users.addUser('wpuser', 'secret', false);
+        await users.addUser('testuser', 'secret', false);
 
         expect(saved).toHaveLength(1);
-        expect(saved[0].username).toBe('wpuser');
+        expect(saved[0].username).toBe('testuser');
         expect(saved[0].admin).toBeUndefined();
     });
 });

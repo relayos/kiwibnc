@@ -73,8 +73,10 @@ function parseMysqlConnectionString(connectionString) {
 
 function isMysqlConnectionString(connectionString) {
     return !!connectionString &&
-        connectionString.indexOf('mysql://') > -1 ||
-        connectionString.indexOf('mariadb://') > -1;
+        (
+            connectionString.indexOf('mysql://') > -1 ||
+            connectionString.indexOf('mariadb://') > -1
+        );
 }
 
 function timestampForFilename() {

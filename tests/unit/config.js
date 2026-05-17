@@ -47,14 +47,14 @@ describe('config environment overrides', () => {
         ].join('\n'));
 
         process.env.BNC_DATABASE_CRYPT_KEY = '12345678901234567890123456789012';
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
         process.env.BNC_DATABASE_TABLE_PREFIX = 'bnc_';
 
         const config = new Config(configPath);
         config.load();
 
         expect(config.get('database.crypt_key')).toBe('12345678901234567890123456789012');
-        expect(config.get('database').users).toBe('mysql://kiwibnc:secret@db.example:3306/wordpress');
+        expect(config.get('database').users).toBe('mysql://kiwibnc:secret@db.example:3306/kiwibnc');
         expect(config.get('database').table_prefix).toBe('bnc_');
     });
 
@@ -87,7 +87,7 @@ describe('config environment overrides', () => {
         ].join('\n'));
 
         process.env.BNC_LOGGING_CUSTOM = '/app/src/worker/messagestores/mariadb.js';
-        process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_DSN = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+        process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_DSN = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
         process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_TABLE = 'bnc_messages';
 
         const config = new Config(configPath);
@@ -96,7 +96,7 @@ describe('config environment overrides', () => {
         expect(config.get('logging').database).toBeUndefined();
         expect(config.get('logging').custom).toBe('/app/src/worker/messagestores/mariadb.js');
         expect(config.get('message_store_mariadb').messages_dsn)
-            .toBe('mysql://kiwibnc:secret@db.example:3306/wordpress');
+            .toBe('mysql://kiwibnc:secret@db.example:3306/kiwibnc');
         expect(config.get('message_store_mariadb').messages_table).toBe('bnc_messages');
     });
 });

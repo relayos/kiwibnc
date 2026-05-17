@@ -73,7 +73,7 @@ describe('database configuration', () => {
 
     test('prefixes KiwiBNC user tables when configured', () => {
         const db = new Database(createConfig({
-            users: 'mysql://kiwibnc:secret@db.example:3306/wordpress',
+            users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc',
             table_prefix: 'bnc_',
         }));
 
@@ -106,7 +106,7 @@ describe('database configuration', () => {
 
     test('parses mysql user dsn with raw slash password', () => {
         const db = new Database(createConfig({
-            users: 'mysql://kiwibnc:raw/pass@db.example:3307/wordpress',
+            users: 'mysql://kiwibnc:raw/pass@db.example:3307/kiwibnc',
             table_prefix: 'bnc_',
         }));
 
@@ -115,7 +115,21 @@ describe('database configuration', () => {
         expect(connection.port).toBe(3307);
         expect(connection.user).toBe('kiwibnc');
         expect(connection.password).toBe('raw/pass');
-        expect(connection.database).toBe('wordpress');
+        expect(connection.database).toBe('kiwibnc');
+    });
+
+    test('supports mariadb user dsn', () => {
+        const db = new Database(createConfig({
+            users: 'mariadb://kiwibnc:secret@db.example:3306/kiwibnc',
+            table_prefix: 'bnc_',
+        }));
+
+        const connection = db.dbUsers.client.config.connection;
+        expect(db.dbUsers.client.config.client).toBe('mysql');
+        expect(connection.host).toBe('db.example');
+        expect(connection.user).toBe('kiwibnc');
+        expect(connection.password).toBe('secret');
+        expect(connection.database).toBe('kiwibnc');
     });
 
     test('does not archive users.db for direct mysql config without prior sqlite path', async () => {
@@ -124,7 +138,7 @@ describe('database configuration', () => {
         fs.writeFileSync(usersDb, 'stale user data');
 
         const db = new Database(createConfig({
-            users: 'mysql://kiwibnc:secret@db.example:3306/wordpress',
+            users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc',
         }, tmpDir));
         await runSuccessfulMigrations(db);
         await closeDb(db);
@@ -138,7 +152,7 @@ describe('database configuration', () => {
         const tmpDir = makeTmpDir();
 
         const db = new Database(createConfig({
-            users: 'mysql://kiwibnc:secret@db.example:3306/wordpress',
+            users: 'mysql://kiwibnc:secret@db.example:3306/kiwibnc',
         }, tmpDir));
         await runSuccessfulMigrations(db);
         await closeDb(db);
@@ -174,7 +188,7 @@ describe('database configuration', () => {
             '',
         ].join('\n'));
         fs.writeFileSync(usersDb, 'env overridden sqlite user data');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
         const config = new Config(configPath);
         config.load();
@@ -200,7 +214,7 @@ describe('database configuration', () => {
             '',
         ].join('\n'));
         fs.writeFileSync(usersDb, 'must survive failed mysql startup');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
         const config = new Config(configPath);
         config.load();
@@ -229,7 +243,7 @@ describe('database configuration', () => {
         ].join('\n'));
         fs.writeFileSync(defaultUsersDb, 'unrelated default sqlite file');
         fs.writeFileSync(configuredUsersDb, 'configured sqlite user data');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
         const config = new Config(configPath);
         config.load();
@@ -257,7 +271,7 @@ describe('database configuration', () => {
             '',
         ].join('\n'));
         fs.writeFileSync(usersDb, 'implicit default sqlite user data');
-        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/kiwibnc';
 
         const config = new Config(configPath);
         config.load();
