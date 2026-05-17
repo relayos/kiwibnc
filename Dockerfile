@@ -10,6 +10,10 @@ RUN npm ci --omit=dev
 
 COPY . .
 
+# Overlay RelayBNC custom KiwiBNC modules without carrying them in core source.
+COPY custom-modules/kiwibnc/ /app/src/
+RUN test -f /app/src/worker/messagestores/mariadb.js
+
 RUN mkdir -p /data
 RUN chmod +x /app/docker-entrypoint.sh
 

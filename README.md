@@ -49,6 +49,31 @@ The RelayOS image uses the in-repo [Dockerfile](./Dockerfile) and [docker-entryp
 
 For deploys, downstream stack config should treat `ghcr.io/relayos/kiwibnc` as the canonical image source and mount `/data` persistently.
 
+### RelayBNC fork reduction
+
+RelayBNC should stay as close to upstream KiwiBNC as practical. RelayOS-owned
+behavior should move into `custom-modules/kiwibnc` when KiwiBNC already exposes
+a clean extension seam. The current image overlays that tree into `/app/src` so
+modules can be packaged without adding more core source divergence.
+
+Current extraction status:
+
+- Already factored: MariaDB message history storage lives in
+  `custom-modules/kiwibnc/worker/messagestores/mariadb.js` and is enabled
+  through `logging.custom`.
+- Keep in core for now: MySQL/MariaDB user DB support, table prefixes, DSN
+  parsing, `wp_user_id`, user/network/token FK migrations, inserted-ID
+  normalization, and stale `users.db` retirement. These are DB/model seams and
+  should move only after a migration/plugin contract exists.
+- Move next: OAuth routes, WordPress identity binding policy, OAuth-created
+  default network handling, and webchat login/registration policy. These should
+  become a RelayBNC auth module after the core exposes stable hooks for web
+  route registration, client config injection, and user mutation.
+
+When the module seams are proven, the intended cleanup path is to rewrite or
+rebase the fork history onto upstream KiwiBNC and cherry-pick only the generic
+core support that cannot live in `custom-modules`.
+
 ## Usage
 Running KiwiBNC for the first time will auto generate a config file in your home directory. You can also create your own using [this](https://github.com/kiwiirc/kiwibnc/blob/master/src/configProfileTemplate/config.ini) as a template and passing `--config=/path/to/config.ini` when running.
 

@@ -10,6 +10,10 @@ describe('config environment overrides', () => {
         'BNC_DATABASE_CRYPT_KEY',
         'BNC_DATABASE_USERS',
         'BNC_DATABASE_TABLE_PREFIX',
+        'BNC_LOGGING_CUSTOM',
+        'BNC_LOGGING_DATABASE',
+        'BNC_MESSAGE_STORE_MARIADB_MESSAGES_DSN',
+        'BNC_MESSAGE_STORE_MARIADB_MESSAGES_TABLE',
     ];
     let originalEnv;
 
@@ -70,5 +74,31 @@ describe('config environment overrides', () => {
         config.load();
 
         expect(config.get('database').table_prefix).toBe('bnc_');
+    });
+
+    test('allows env-only relaybnc mariadb message-store config', () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-config-'));
+        const configPath = path.join(tmpDir, 'config.ini');
+        fs.writeFileSync(configPath, [
+            '[logging]',
+            '# database intentionally omitted so custom store owns reads',
+            'custom=""',
+            '',
+            '[message_store_mariadb]',
+            'messages_table="bnc_messages"',
+            '',
+        ].join('\n'));
+
+        process.env.BNC_LOGGING_CUSTOM = '/app/src/worker/messagestores/mariadb.js';
+        process.env.BNC_MESSAGE_STORE_MARIADB_MESSAGES_DSN = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+
+        const config = new Config(configPath);
+        config.load();
+
+        expect(config.get('logging').database).toBeUndefined();
+        expect(config.get('logging').custom).toBe('/app/src/worker/messagestores/mariadb.js');
+        expect(config.get('message_store_mariadb').messages_dsn)
+            .toBe('mysql://kiwibnc:secret@db.example:3306/wordpress');
+        expect(config.get('message_store_mariadb').messages_table).toBe('bnc_messages');
     });
 });

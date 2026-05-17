@@ -1,0 +1,3 @@
+[submodule "custom-modules"]
+	path = custom-modules
+	url = https://github.com/relayos/custom-modules.git
