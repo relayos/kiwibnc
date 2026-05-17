@@ -65,6 +65,12 @@ describe('database configuration', () => {
             .filter((filename) => filename.startsWith('users.db.retired-') && filename.endsWith('.bak'));
     }
 
+    async function runSuccessfulMigrations(db) {
+        db.migrateConnections = jest.fn().mockResolvedValue([]);
+        db.migrateUsers = jest.fn().mockResolvedValue([]);
+        await db.init();
+    }
+
     test('prefixes KiwiBNC user tables when configured', () => {
         const db = new Database(createConfig({
             users: 'mysql://kiwibnc:secret@db.example:3306/wordpress',
@@ -112,7 +118,7 @@ describe('database configuration', () => {
         expect(connection.database).toBe('wordpress');
     });
 
-    test('archives existing stale users.db when users database is mysql', async () => {
+    test('does not archive users.db for direct mysql config without prior sqlite path', async () => {
         const tmpDir = makeTmpDir();
         const usersDb = path.join(tmpDir, 'users.db');
         fs.writeFileSync(usersDb, 'stale user data');
@@ -120,14 +126,12 @@ describe('database configuration', () => {
         const db = new Database(createConfig({
             users: 'mysql://kiwibnc:secret@db.example:3306/wordpress',
         }, tmpDir));
+        await runSuccessfulMigrations(db);
         await closeDb(db);
 
-        const archived = retiredUsersFiles(tmpDir);
-        expect(fs.existsSync(usersDb)).toBe(false);
-        expect(archived).toHaveLength(1);
-        expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('stale user data');
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Retired stale SQLite users database'));
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('database.users is configured for MySQL/MariaDB'));
+        expect(fs.existsSync(usersDb)).toBe(true);
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
+        expect(warnSpy).not.toHaveBeenCalled();
     });
 
     test('does not fail when stale users.db is missing for mysql users database', async () => {
@@ -136,6 +140,7 @@ describe('database configuration', () => {
         const db = new Database(createConfig({
             users: 'mysql://kiwibnc:secret@db.example:3306/wordpress',
         }, tmpDir));
+        await runSuccessfulMigrations(db);
         await closeDb(db);
 
         expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
@@ -150,6 +155,7 @@ describe('database configuration', () => {
         const db = new Database(createConfig({
             users: './users.db',
         }, tmpDir));
+        await runSuccessfulMigrations(db);
         await closeDb(db);
 
         expect(fs.existsSync(usersDb)).toBe(true);
@@ -173,6 +179,7 @@ describe('database configuration', () => {
         const config = new Config(configPath);
         config.load();
         const db = new Database(config);
+        await runSuccessfulMigrations(db);
         await closeDb(db);
 
         const archived = retiredUsersFiles(tmpDir);
@@ -181,5 +188,86 @@ describe('database configuration', () => {
         expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('env overridden sqlite user data');
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Retired stale SQLite users database'));
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('database.users is configured for MySQL/MariaDB'));
+    });
+
+    test('does not archive stale users.db before mysql migrations succeed', async () => {
+        const tmpDir = makeTmpDir();
+        const configPath = path.join(tmpDir, 'config.ini');
+        const usersDb = path.join(tmpDir, 'users.db');
+        fs.writeFileSync(configPath, [
+            '[database]',
+            'users="./users.db"',
+            '',
+        ].join('\n'));
+        fs.writeFileSync(usersDb, 'must survive failed mysql startup');
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+
+        const config = new Config(configPath);
+        config.load();
+        const db = new Database(config);
+        db.migrateConnections = jest.fn().mockResolvedValue([]);
+        db.migrateUsers = jest.fn().mockRejectedValue(new Error('mysql unavailable'));
+
+        await expect(db.init()).rejects.toThrow('mysql unavailable');
+        await closeDb(db);
+
+        expect(fs.existsSync(usersDb)).toBe(true);
+        expect(fs.readFileSync(usersDb, 'utf8')).toBe('must survive failed mysql startup');
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
+        expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    test('archives configured non-default sqlite users path after env mysql override', async () => {
+        const tmpDir = makeTmpDir();
+        const configPath = path.join(tmpDir, 'config.ini');
+        const defaultUsersDb = path.join(tmpDir, 'users.db');
+        const configuredUsersDb = path.join(tmpDir, 'staging-users.db');
+        fs.writeFileSync(configPath, [
+            '[database]',
+            'users="./staging-users.db"',
+            '',
+        ].join('\n'));
+        fs.writeFileSync(defaultUsersDb, 'unrelated default sqlite file');
+        fs.writeFileSync(configuredUsersDb, 'configured sqlite user data');
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+
+        const config = new Config(configPath);
+        config.load();
+        const db = new Database(config);
+        await runSuccessfulMigrations(db);
+        await closeDb(db);
+
+        const archived = fs.readdirSync(tmpDir)
+            .filter((filename) => filename.startsWith('staging-users.db.retired-') && filename.endsWith('.bak'));
+        expect(fs.existsSync(defaultUsersDb)).toBe(true);
+        expect(fs.readFileSync(defaultUsersDb, 'utf8')).toBe('unrelated default sqlite file');
+        expect(fs.existsSync(configuredUsersDb)).toBe(false);
+        expect(archived).toHaveLength(1);
+        expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('configured sqlite user data');
+        expect(retiredUsersFiles(tmpDir)).toHaveLength(0);
+    });
+
+    test('archives implicit default users.db after env mysql override', async () => {
+        const tmpDir = makeTmpDir();
+        const configPath = path.join(tmpDir, 'config.ini');
+        const usersDb = path.join(tmpDir, 'users.db');
+        fs.writeFileSync(configPath, [
+            '[database]',
+            'state="./connections.db"',
+            '',
+        ].join('\n'));
+        fs.writeFileSync(usersDb, 'implicit default sqlite user data');
+        process.env.BNC_DATABASE_USERS = 'mysql://kiwibnc:secret@db.example:3306/wordpress';
+
+        const config = new Config(configPath);
+        config.load();
+        const db = new Database(config);
+        await runSuccessfulMigrations(db);
+        await closeDb(db);
+
+        const archived = retiredUsersFiles(tmpDir);
+        expect(fs.existsSync(usersDb)).toBe(false);
+        expect(archived).toHaveLength(1);
+        expect(fs.readFileSync(path.join(tmpDir, archived[0]), 'utf8')).toBe('implicit default sqlite user data');
     });
 });

@@ -72,7 +72,8 @@ function parseMysqlConnectionString(connectionString) {
 }
 
 function isMysqlConnectionString(connectionString) {
-    return connectionString.indexOf('mysql://') > -1 ||
+    return !!connectionString &&
+        connectionString.indexOf('mysql://') > -1 ||
         connectionString.indexOf('mariadb://') > -1;
 }
 
@@ -104,8 +105,25 @@ function logRetiredUsersDb(sourcePath, retiredPath) {
     }
 }
 
-function archiveStaleUsersDb(config) {
-    const usersDbPath = config.relativePath('users.db');
+function configuredSqliteUsersPath(config, configuredUsersConStr, hasConfiguredDatabase) {
+    if (!hasConfiguredDatabase) {
+        return null;
+    }
+
+    const usersConStr = configuredUsersConStr || 'users.db';
+    if (usersConStr.indexOf('postgres://') > -1 ||
+        isMysqlConnectionString(usersConStr)) {
+        return null;
+    }
+
+    return config.relativePath(usersConStr);
+}
+
+function archiveStaleUsersDb(usersDbPath) {
+    if (!usersDbPath) {
+        return;
+    }
+
     if (!fs.existsSync(usersDbPath)) {
         return;
     }
@@ -121,8 +139,13 @@ function archiveStaleUsersDb(config) {
 
 module.exports = class Database {
     constructor(config) {
+        let hasConfiguredDatabase = !!(config.c && config.c.database);
+        let configuredUsersConStr = config.c && config.c.database ?
+            config.c.database.users :
+            undefined;
         let dbConf = config.get('database', {});
         let userTablePrefix = dbConf.table_prefix || '';
+        this.staleUsersDbPath = null;
         this.userMigrationTableName = `${userTablePrefix}knex_migrations`;
         let wrapUserIdentifier = (value, origImpl) => {
             let prefixedValue = USER_DB_TABLES.has(value) ?
@@ -157,7 +180,7 @@ module.exports = class Database {
                 usersDbCon.searchPath = searchPathM[1].split(',');
             }
         } else if (isMysqlConnectionString(usersConStr)) {
-            archiveStaleUsersDb(config);
+            this.staleUsersDbPath = configuredSqliteUsersPath(config, configuredUsersConStr, hasConfiguredDatabase);
             // mysql://user:password@127.0.0.1:3306/database
             usersDbCon = {
                 client: 'mysql',
@@ -197,13 +220,22 @@ module.exports = class Database {
         return this.dbUsers.raw(sql, params);
     }
 
-    async init() {
-        await this.dbConnections.migrate.latest({
+    migrateConnections() {
+        return this.dbConnections.migrate.latest({
             directory: path.join(__dirname, '..', 'dbschemas', 'connections'),
         });
-        await this.dbUsers.migrate.latest({
+    }
+
+    migrateUsers() {
+        return this.dbUsers.migrate.latest({
             directory: path.join(__dirname, '..', 'dbschemas', 'users'),
             tableName: this.userMigrationTableName,
         });
+    }
+
+    async init() {
+        await this.migrateConnections();
+        await this.migrateUsers();
+        archiveStaleUsersDb(this.staleUsersDbPath);
     }
 }
