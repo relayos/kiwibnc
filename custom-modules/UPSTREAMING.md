@@ -40,11 +40,31 @@ Files:
 Scope:
 
 - MySQL/MariaDB user DB DSN parsing.
-- Stale SQLite `users.db` retirement after successful SQL migrations.
 
 Keep examples generic (`kiwibnc`, `ExampleNet`, `irc.example.test`). Do not
-include WordPress, OAuth, RelayOS, or `bnc_` as product policy beyond neutral
-table-prefix examples.
+include stale SQLite retirement, table prefixes, WordPress, OAuth, RelayOS, or
+product-specific policy.
+
+### Retire Stale SQLite Users DB
+
+Branch name:
+
+- `upstreamable/retire-stale-users-db`
+
+Files:
+
+- `src/libs/database.js`
+- `tests/unit/database.js`
+
+Scope:
+
+- Archive a previously configured SQLite `users.db` only after effective
+  MySQL/MariaDB user DB migrations succeed.
+- Leave active SQLite configs and direct SQL configs without a prior SQLite path
+  untouched.
+
+This branch is intentionally separate from SQL user database support because it
+is a migration safety behavior, not a SQL connection feature.
 
 ### User Table Prefixes
 
