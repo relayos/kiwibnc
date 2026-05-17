@@ -21,6 +21,16 @@ describe('RelayBNC custom module packaging', () => {
         expect(woodpecker).toMatch(/name: publish-image[\s\S]*branch: \[master\]/);
     });
 
+    test('checks out private custom-modules after clone with credentials', () => {
+        const woodpecker = fs.readFileSync(path.join(repoRoot, '.woodpecker.yml'), 'utf8');
+
+        expect(woodpecker).toContain('recursive: false');
+        expect(woodpecker).toContain('name: custom-modules-checkout');
+        expect(woodpecker).toContain('from_secret: ghcr_username');
+        expect(woodpecker).toContain('from_secret: ghcr_token');
+        expect(woodpecker).toContain('git submodule update --init --recursive --depth=1 custom-modules');
+    });
+
     test('copies KiwiBNC custom modules into the runtime source tree', () => {
         const dockerfile = fs.readFileSync(path.join(repoRoot, 'Dockerfile'), 'utf8');
 
