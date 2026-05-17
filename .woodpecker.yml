@@ -9,18 +9,6 @@ clone:
       depth: 0
 
 steps:
-  - name: custom-modules-checkout
-    image: alpine/git:2.45.2
-    environment:
-      GIT_USERNAME:
-        from_secret: ghcr_username
-      GIT_TOKEN:
-        from_secret: ghcr_token
-    commands:
-      - git config --global url."https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
-      - git submodule sync --recursive
-      - git submodule update --init --recursive --depth=1 custom-modules
-
   - name: validation
     image: node:20-alpine
     commands:
@@ -30,7 +18,7 @@ steps:
   - name: custom-modules-validation
     image: python:3.12-alpine
     commands:
-      - python3 -m unittest discover -s custom-modules/tests -p 'test_*.py' -v
+      - python3 -m unittest discover -s custom-modules/tests -p 'test_kiwibnc_*.py' -v
 
   - name: test-build
     image: woodpeckerci/plugin-docker-buildx

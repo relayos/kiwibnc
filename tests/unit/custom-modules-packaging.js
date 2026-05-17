@@ -5,12 +5,14 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const webchatDir = path.join(repoRoot, 'src/extensions/webchat');
 
 describe('RelayBNC custom module packaging', () => {
-    test('tracks relayos custom-modules as a submodule', () => {
-        const gitmodules = fs.readFileSync(path.join(repoRoot, '.gitmodules'), 'utf8');
+    test('vendors a ci-safe relaybnc custom module snapshot instead of a private submodule', () => {
+        expect(fs.existsSync(path.join(repoRoot, '.gitmodules'))).toBe(false);
+        expect(fs.existsSync(path.join(repoRoot, 'custom-modules/.git'))).toBe(false);
 
-        expect(gitmodules).toContain('[submodule "custom-modules"]');
-        expect(gitmodules).toContain('path = custom-modules');
-        expect(gitmodules).toContain('url = https://github.com/relayos/custom-modules.git');
+        const gitmodules = fs.existsSync(path.join(repoRoot, '.gitmodules'))
+            ? fs.readFileSync(path.join(repoRoot, '.gitmodules'), 'utf8')
+            : '';
+        expect(gitmodules).not.toContain('https://github.com/relayos/custom-modules.git');
     });
 
     test('runs validation on feature branch pushes while publishing only master', () => {
@@ -21,14 +23,13 @@ describe('RelayBNC custom module packaging', () => {
         expect(woodpecker).toMatch(/name: publish-image[\s\S]*branch: \[master\]/);
     });
 
-    test('checks out private custom-modules after clone with credentials', () => {
+    test('does not require private custom-modules checkout during ci clone', () => {
         const woodpecker = fs.readFileSync(path.join(repoRoot, '.woodpecker.yml'), 'utf8');
 
         expect(woodpecker).toContain('recursive: false');
-        expect(woodpecker).toContain('name: custom-modules-checkout');
-        expect(woodpecker).toContain('from_secret: ghcr_username');
-        expect(woodpecker).toContain('from_secret: ghcr_token');
-        expect(woodpecker).toContain('git submodule update --init --recursive --depth=1 custom-modules');
+        expect(woodpecker).not.toContain('name: custom-modules-checkout');
+        expect(woodpecker).not.toContain('git submodule update');
+        expect(woodpecker).toContain("python3 -m unittest discover -s custom-modules/tests -p 'test_kiwibnc_*.py' -v");
     });
 
     test('copies KiwiBNC custom modules into the runtime source tree', () => {

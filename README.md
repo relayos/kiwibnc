@@ -54,8 +54,10 @@ For deploys, downstream stack config should treat `ghcr.io/relayos/kiwibnc` as t
 
 RelayBNC should stay as close to upstream KiwiBNC as practical. RelayOS-owned
 behavior should move into `custom-modules/kiwibnc` when KiwiBNC already exposes
-a clean extension seam. The current image overlays that tree into `/app/src` so
-modules can be packaged without adding more core source divergence.
+a clean extension seam. This branch carries a CI-safe snapshot of the
+KiwiBNC-specific `custom-modules/kiwibnc` overlay and copies that tree into
+`/app/src` so modules can be packaged without adding more core source
+divergence or requiring private cross-repo checkout during Woodpecker clone.
 
 Current extraction status:
 
