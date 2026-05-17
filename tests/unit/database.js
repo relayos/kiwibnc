@@ -132,6 +132,19 @@ describe('database configuration', () => {
         expect(connection.database).toBe('kiwibnc');
     });
 
+    test('treats paths containing mysql-like text as sqlite paths', async () => {
+        const tmpDir = makeTmpDir();
+        const db = new Database(createConfig({
+            users: './archive/mysql://users.db',
+        }, tmpDir));
+
+        expect(db.dbUsers.client.config.client).toBe('better-sqlite3');
+        expect(db.dbUsers.client.config.connection.filename)
+            .toBe(path.join(tmpDir, './archive/mysql://users.db'));
+
+        await closeDb(db);
+    });
+
     test('does not archive users.db for direct mysql config without prior sqlite path', async () => {
         const tmpDir = makeTmpDir();
         const usersDb = path.join(tmpDir, 'users.db');

@@ -74,8 +74,8 @@ function parseMysqlConnectionString(connectionString) {
 function isMysqlConnectionString(connectionString) {
     return !!connectionString &&
         (
-            connectionString.indexOf('mysql://') > -1 ||
-            connectionString.indexOf('mariadb://') > -1
+            connectionString.startsWith('mysql://') ||
+            connectionString.startsWith('mariadb://')
         );
 }
 
@@ -113,7 +113,7 @@ function configuredSqliteUsersPath(config, configuredUsersConStr, hasConfiguredD
     }
 
     const usersConStr = configuredUsersConStr || 'users.db';
-    if (usersConStr.indexOf('postgres://') > -1 ||
+    if (usersConStr.startsWith('postgres://') ||
         isMysqlConnectionString(usersConStr)) {
         return null;
     }
@@ -172,7 +172,7 @@ module.exports = class Database {
             connection: null,
             acquireConnectionTimeout: 10000,
         };
-        if (usersConStr.indexOf('postgres://') > -1) {
+        if (usersConStr.startsWith('postgres://')) {
             // postgres://someuser:somepassword@somehost:381/somedatabase
             usersDbCon.client = 'pg';
             usersDbCon.connection = usersConStr;
