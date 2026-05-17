@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const knex = require('knex');
 
 const USER_DB_TABLES = new Set([
@@ -13,7 +14,7 @@ function decodeConnectionPart(value) {
 }
 
 function parseMysqlConnectionString(connectionString) {
-    const scheme = 'mysql://';
+    const scheme = connectionString.startsWith('mariadb://') ? 'mariadb://' : 'mysql://';
     const withoutScheme = connectionString.slice(scheme.length);
     const authEnd = withoutScheme.lastIndexOf('@');
     if (authEnd === -1) {
@@ -70,6 +71,54 @@ function parseMysqlConnectionString(connectionString) {
     return connection;
 }
 
+function isMysqlConnectionString(connectionString) {
+    return connectionString.indexOf('mysql://') > -1 ||
+        connectionString.indexOf('mariadb://') > -1;
+}
+
+function timestampForFilename() {
+    return (new Date()).toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}Z$/, 'Z');
+}
+
+function nextRetiredPath(filePath) {
+    const basePath = `${filePath}.retired-${timestampForFilename()}`;
+    let retiredPath = `${basePath}.bak`;
+    let counter = 1;
+
+    while (fs.existsSync(retiredPath)) {
+        retiredPath = `${basePath}-${counter}.bak`;
+        counter++;
+    }
+
+    return retiredPath;
+}
+
+function logRetiredUsersDb(sourcePath, retiredPath) {
+    const msg = `Retired stale SQLite users database ${sourcePath} to ${retiredPath} because database.users is configured for MySQL/MariaDB`;
+    if (global.l && global.l.warn) {
+        global.l.warn(msg);
+    } else {
+        console.warn(msg);
+    }
+}
+
+function archiveStaleUsersDb(config) {
+    const usersDbPath = config.relativePath('users.db');
+    if (!fs.existsSync(usersDbPath)) {
+        return;
+    }
+
+    if (!fs.statSync(usersDbPath).isFile()) {
+        return;
+    }
+
+    const retiredPath = nextRetiredPath(usersDbPath);
+    fs.renameSync(usersDbPath, retiredPath);
+    logRetiredUsersDb(usersDbPath, retiredPath);
+}
+
 module.exports = class Database {
     constructor(config) {
         let dbConf = config.get('database', {});
@@ -107,7 +156,8 @@ module.exports = class Database {
             if (searchPathM) {
                 usersDbCon.searchPath = searchPathM[1].split(',');
             }
-        } else if (usersConStr.indexOf('mysql://') > -1) {
+        } else if (isMysqlConnectionString(usersConStr)) {
+            archiveStaleUsersDb(config);
             // mysql://user:password@127.0.0.1:3306/database
             usersDbCon = {
                 client: 'mysql',
