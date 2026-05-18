@@ -67,3 +67,52 @@ describe('MariaDbMessageStore connection config', () => {
         });
     });
 });
+
+describe('MariaDbMessageStore history boundaries', () => {
+    function buildStore() {
+        const store = new MariaDbMessageStore({
+            get: jest.fn((key) => {
+                if (key === 'message_store_mariadb') {
+                    return {
+                        messages_dsn: 'mysql://editor:pass@db.example/relayos',
+                        auto_migrate: false,
+                    };
+                }
+                if (key === 'database') {
+                    return { table_prefix: 'bnc_' };
+                }
+                return {};
+            }),
+        });
+        store.messagesQuery = jest.fn(async () => []);
+        return store;
+    }
+
+    test('treats timestamp to boundary as exclusive in getMessagesBetween', async () => {
+        const store = buildStore();
+
+        await store.getMessagesBetween(
+            1,
+            2,
+            '#Test',
+            { type: 'timestamp', value: 1000 },
+            { type: 'timestamp', value: 2000 },
+            10
+        );
+
+        expect(store.messagesQuery).toHaveBeenCalledTimes(1);
+        const params = store.messagesQuery.mock.calls[0][1];
+        expect(params).toEqual([
+            1,
+            2,
+            '#test',
+            1000,
+            1000,
+            0,
+            2000,
+            2000,
+            0,
+            10,
+        ]);
+    });
+});

@@ -328,7 +328,7 @@ class MariaDbMessageStore {
         if (ref.type === 'timestamp') {
             return {
                 time: ref.value,
-                id: order === 'DESC' ? Number.MAX_SAFE_INTEGER : 0,
+                id: 0,
             };
         }
 
