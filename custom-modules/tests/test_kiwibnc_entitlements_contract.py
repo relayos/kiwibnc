@@ -108,14 +108,53 @@ db.raw = async (sql) => {
             "FOREIGN KEY (`wp_user_id`) REFERENCES `wp_users` (`ID`)",
             "FOREIGN KEY (entitlement_key) REFERENCES `relayos_entitlements` (`key`)",
             "source VARCHAR(64) NOT NULL DEFAULT 'system'",
-            "source_ref VARCHAR(191) NULL",
+            "source_ref VARCHAR(191) NOT NULL DEFAULT ''",
+            "UNIQUE KEY uniq_relayos_user_entitlement_source (wp_user_id, entitlement_key, source, source_ref)",
             "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'system'",
-            "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS source_ref VARCHAR(191) NULL",
+            "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS source_ref VARCHAR(191) NOT NULL DEFAULT ''",
+            "UPDATE `relayos_user_entitlements` SET source_ref = '' WHERE source_ref IS NULL",
+            "ALTER TABLE `relayos_user_entitlements` MODIFY source_ref VARCHAR(191) NOT NULL DEFAULT ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uniq_relayos_user_entitlement_source ON `relayos_user_entitlements` (wp_user_id, entitlement_key, source, source_ref)",
             "KEY idx_relayos_user_entitlements_source (source, source_ref)",
             "ON DELETE CASCADE",
         ]
         for snippet in expected_snippets:
             self.assertIn(snippet, text)
+
+        self.assertNotIn("UNIQUE KEY uniq_relayos_user_entitlement (wp_user_id, entitlement_key)", text)
+
+    def test_schema_migrates_legacy_source_blind_unique_key(self):
+        script = r"""
+const RelayosEntitlements = require('./kiwibnc/libs/relayos_entitlements');
+const statements = [];
+function db() {}
+db.raw = async (sql, bindings) => {
+    const normalized = String(sql).replace(/\s+/g, ' ').trim();
+    statements.push(normalized);
+    if (normalized.includes('information_schema.STATISTICS') && bindings[1] === 'uniq_relayos_user_entitlement') {
+        return [[{ INDEX_NAME: 'uniq_relayos_user_entitlement' }]];
+    }
+    if (normalized.includes('information_schema.STATISTICS')) {
+        return [[]];
+    }
+    return [[]];
+};
+(async () => {
+    const resolver = new RelayosEntitlements({ db, overlayPath: '' });
+    await resolver.migrateSchema();
+    console.log(JSON.stringify(statements));
+})().catch((err) => {
+    console.error(err.stack || err.message);
+    process.exit(1);
+});
+"""
+        text = " ".join(json.loads(self.run_node(script)))
+
+        self.assertIn(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uniq_relayos_user_entitlement_source ON `relayos_user_entitlements` (wp_user_id, entitlement_key, source, source_ref)",
+            text,
+        )
+        self.assertIn("ALTER TABLE `relayos_user_entitlements` DROP INDEX uniq_relayos_user_entitlement", text)
 
     def test_db_capability_mappings_are_authoritative(self):
         script = r"""

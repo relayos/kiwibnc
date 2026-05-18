@@ -94,14 +94,14 @@ class RelayosEntitlements {
                 wp_user_id BIGINT UNSIGNED NOT NULL,
                 entitlement_key VARCHAR(191) NOT NULL,
                 source VARCHAR(64) NOT NULL DEFAULT 'system',
-                source_ref VARCHAR(191) NULL,
+                source_ref VARCHAR(191) NOT NULL DEFAULT '',
                 status VARCHAR(32) NOT NULL DEFAULT 'active',
                 starts_at DATETIME NULL,
                 expires_at DATETIME NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 PRIMARY KEY (id),
-                UNIQUE KEY uniq_relayos_user_entitlement (wp_user_id, entitlement_key),
+                UNIQUE KEY uniq_relayos_user_entitlement_source (wp_user_id, entitlement_key, source, source_ref),
                 KEY idx_relayos_user_entitlements_source (source, source_ref),
                 KEY idx_relayos_user_entitlements_active (wp_user_id, status, starts_at, expires_at),
                 CONSTRAINT fk_relayos_user_entitlements_wp_user
@@ -120,13 +120,51 @@ class RelayosEntitlements {
 
         await this.db.raw(`
             ALTER TABLE ${userEntitlements}
-            ADD COLUMN IF NOT EXISTS source_ref VARCHAR(191) NULL
+            ADD COLUMN IF NOT EXISTS source_ref VARCHAR(191) NOT NULL DEFAULT ''
+        `);
+
+        await this.db.raw(`
+            UPDATE ${userEntitlements}
+            SET source_ref = ''
+            WHERE source_ref IS NULL
+        `);
+
+        await this.db.raw(`
+            ALTER TABLE ${userEntitlements}
+            MODIFY source_ref VARCHAR(191) NOT NULL DEFAULT ''
         `);
 
         await this.db.raw(`
             CREATE INDEX IF NOT EXISTS idx_relayos_user_entitlements_source
             ON ${userEntitlements} (source, source_ref)
         `);
+
+        await this.db.raw(`
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_relayos_user_entitlement_source
+            ON ${userEntitlements} (wp_user_id, entitlement_key, source, source_ref)
+        `);
+
+        if (await this.indexExists('uniq_relayos_user_entitlement')) {
+            await this.db.raw(`
+                ALTER TABLE ${userEntitlements}
+                DROP INDEX uniq_relayos_user_entitlement
+            `);
+        }
+    }
+
+    async indexExists(indexName) {
+        validateIdentifier(indexName);
+
+        const rows = rowsFromRaw(await this.db.raw(
+            `SELECT INDEX_NAME
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?
+               AND INDEX_NAME = ?`,
+            [this.tables.userEntitlements, indexName]
+        ));
+
+        return rows.some((row) => row.INDEX_NAME === indexName || row.index_name === indexName);
     }
 
     async seedDefaults() {
