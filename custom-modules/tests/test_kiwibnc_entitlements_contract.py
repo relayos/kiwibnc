@@ -107,6 +107,11 @@ db.raw = async (sql) => {
             "COLLATE=utf8mb4_unicode_520_ci",
             "FOREIGN KEY (`wp_user_id`) REFERENCES `wp_users` (`ID`)",
             "FOREIGN KEY (entitlement_key) REFERENCES `relayos_entitlements` (`key`)",
+            "source VARCHAR(64) NOT NULL DEFAULT 'system'",
+            "source_ref VARCHAR(191) NULL",
+            "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'system'",
+            "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS source_ref VARCHAR(191) NULL",
+            "KEY idx_relayos_user_entitlements_source (source, source_ref)",
             "ON DELETE CASCADE",
         ]
         for snippet in expected_snippets:

@@ -93,6 +93,8 @@ class RelayosEntitlements {
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                 wp_user_id BIGINT UNSIGNED NOT NULL,
                 entitlement_key VARCHAR(191) NOT NULL,
+                source VARCHAR(64) NOT NULL DEFAULT 'system',
+                source_ref VARCHAR(191) NULL,
                 status VARCHAR(32) NOT NULL DEFAULT 'active',
                 starts_at DATETIME NULL,
                 expires_at DATETIME NULL,
@@ -100,6 +102,7 @@ class RelayosEntitlements {
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 PRIMARY KEY (id),
                 UNIQUE KEY uniq_relayos_user_entitlement (wp_user_id, entitlement_key),
+                KEY idx_relayos_user_entitlements_source (source, source_ref),
                 KEY idx_relayos_user_entitlements_active (wp_user_id, status, starts_at, expires_at),
                 CONSTRAINT fk_relayos_user_entitlements_wp_user
                     FOREIGN KEY (\`wp_user_id\`) REFERENCES ${wpUsers} (\`ID\`)
@@ -108,6 +111,21 @@ class RelayosEntitlements {
                     FOREIGN KEY (entitlement_key) REFERENCES ${entitlements} (\`key\`)
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
+        `);
+
+        await this.db.raw(`
+            ALTER TABLE ${userEntitlements}
+            ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'system'
+        `);
+
+        await this.db.raw(`
+            ALTER TABLE ${userEntitlements}
+            ADD COLUMN IF NOT EXISTS source_ref VARCHAR(191) NULL
+        `);
+
+        await this.db.raw(`
+            CREATE INDEX IF NOT EXISTS idx_relayos_user_entitlements_source
+            ON ${userEntitlements} (source, source_ref)
         `);
     }
 
