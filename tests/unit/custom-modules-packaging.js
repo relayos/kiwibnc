@@ -31,6 +31,13 @@ describe('custom module packaging', () => {
         expect(woodpecker).toContain("python3 -m unittest discover -s custom-modules/tests -p 'test_kiwibnc_*.py' -v");
     });
 
+    test('custom module validation has both node and python available', () => {
+        const woodpecker = fs.readFileSync(path.join(repoRoot, '.woodpecker.yml'), 'utf8');
+
+        expect(woodpecker).toMatch(/name: custom-modules-validation[\s\S]*image: node:20-alpine/);
+        expect(woodpecker).toMatch(/name: custom-modules-validation[\s\S]*apk add --no-cache python3/);
+    });
+
     test('vendors only KiwiBNC custom module contract tests', () => {
         const testsDir = path.join(repoRoot, 'custom-modules/tests');
         const contractTests = fs.readdirSync(testsDir)

@@ -16,8 +16,9 @@ steps:
       - ./node_modules/.bin/jest --runInBand
 
   - name: custom-modules-validation
-    image: python:3.12-alpine
+    image: node:20-alpine
     commands:
+      - apk add --no-cache python3
       - python3 -m unittest discover -s custom-modules/tests -p 'test_kiwibnc_*.py' -v
 
   - name: test-build
