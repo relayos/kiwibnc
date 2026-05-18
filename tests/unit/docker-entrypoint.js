@@ -71,6 +71,73 @@ describe('docker-entrypoint', () => {
     expect(result.status).toBe(0);
   });
 
+  test('preserves valid config when persisted loaded array has no trailing comma', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
+    const dataDir = path.join(tmpDir, 'data');
+    const configDir = path.join(dataDir, '.kiwibnc');
+    const configPath = path.join(configDir, 'config.ini');
+
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      [
+        '[extensions]',
+        'loaded = [',
+        '    "bouncer"',
+        ']',
+        '',
+      ].join('\n')
+    );
+
+    const result = spawnSync(
+      '/bin/sh',
+      [
+        'docker-entrypoint.sh',
+        'node',
+        '-e',
+        'const fs=require("fs"); const s=fs.readFileSync(process.env.KIWIBNC_DATA_DIR+"/.kiwibnc/config.ini","utf8"); process.exit(s.includes(\'"bouncer",\\n    "offline-messaging",\') ? 0 : 1)',
+      ],
+      {
+        cwd: path.resolve(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          KIWIBNC_DATA_DIR: dataDir,
+        },
+      }
+    );
+
+    expect(result.status).toBe(0);
+  });
+
+  test('preserves valid config when persisted loaded array is inline', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
+    const dataDir = path.join(tmpDir, 'data');
+    const configDir = path.join(dataDir, '.kiwibnc');
+    const configPath = path.join(configDir, 'config.ini');
+
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(configPath, '[extensions]\nloaded = ["bouncer"]\n');
+
+    const result = spawnSync(
+      '/bin/sh',
+      [
+        'docker-entrypoint.sh',
+        'node',
+        '-e',
+        'const fs=require("fs"); const s=fs.readFileSync(process.env.KIWIBNC_DATA_DIR+"/.kiwibnc/config.ini","utf8"); process.exit(s.includes(\'loaded = ["bouncer",\\n    "offline-messaging",\') ? 0 : 1)',
+      ],
+      {
+        cwd: path.resolve(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          KIWIBNC_DATA_DIR: dataDir,
+        },
+      }
+    );
+
+    expect(result.status).toBe(0);
+  });
+
   test('does not duplicate offline messaging in persisted config', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
     const dataDir = path.join(tmpDir, 'data');

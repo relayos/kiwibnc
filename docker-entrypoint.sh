@@ -48,8 +48,14 @@ function patchExtensionsSection(text) {
           return match;
         }
 
-        const separator = loaded.endsWith('\n') ? '' : '\n';
-        return `${start}${loaded}${separator}${extensionLine}\n${end}`;
+        const content = loaded.trim();
+        let patchedLoaded = loaded;
+        if (content && !content.endsWith(',')) {
+          patchedLoaded = patchedLoaded.replace(/(\S)(\s*)$/, '$1,$2');
+        }
+
+        const separator = patchedLoaded.endsWith('\n') ? '' : '\n';
+        return `${start}${patchedLoaded}${separator}${extensionLine}\n${end}`;
       }
     );
   }
