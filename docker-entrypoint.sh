@@ -22,18 +22,42 @@ const fs = require('fs');
 
 const configPath = process.argv[2];
 let config = fs.readFileSync(configPath, 'utf8');
+const extensionLine = '    "offline-messaging",';
 
-config = config.replace(
-  /(\[extensions\][\s\S]*?loaded\s*=\s*\[)([\s\S]*?)(\])/m,
-  (match, start, loaded, end) => {
-    if (loaded.includes('"offline-messaging"')) {
-      return match;
-    }
-
-    const separator = loaded.endsWith('\n') ? '' : '\n';
-    return `${start}${loaded}${separator}    "offline-messaging",\n${end}`;
+function patchExtensionsSection(text) {
+  const sectionStart = text.search(/^\[extensions\]$/m);
+  if (sectionStart === -1) {
+    const separator = text.endsWith('\n') ? '\n' : '\n\n';
+    return `${text}${separator}[extensions]\nloaded = [\n${extensionLine}\n]\n`;
   }
-);
+
+  const nextSectionMatch = text.slice(sectionStart + 1).match(/\n\[[^\]\n]+\]/);
+  const sectionEnd = nextSectionMatch
+    ? sectionStart + 1 + nextSectionMatch.index
+    : text.length;
+  let section = text.slice(sectionStart, sectionEnd);
+
+  if (!/loaded\s*=\s*\[/.test(section)) {
+    const separator = section.endsWith('\n') ? '' : '\n';
+    section = `${section}${separator}loaded = [\n${extensionLine}\n]\n`;
+  } else {
+    section = section.replace(
+      /(loaded\s*=\s*\[)([\s\S]*?)(\])/m,
+      (match, start, loaded, end) => {
+        if (loaded.includes('"offline-messaging"')) {
+          return match;
+        }
+
+        const separator = loaded.endsWith('\n') ? '' : '\n';
+        return `${start}${loaded}${separator}${extensionLine}\n${end}`;
+      }
+    );
+  }
+
+  return `${text.slice(0, sectionStart)}${section}${text.slice(sectionEnd)}`;
+}
+
+config = patchExtensionsSection(config);
 
 fs.writeFileSync(configPath, config);
 NODE

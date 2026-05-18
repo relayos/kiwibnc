@@ -71,6 +71,74 @@ describe('docker-entrypoint', () => {
     expect(result.status).toBe(0);
   });
 
+  test('does not duplicate offline messaging in persisted config', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
+    const dataDir = path.join(tmpDir, 'data');
+    const configDir = path.join(dataDir, '.kiwibnc');
+    const configPath = path.join(configDir, 'config.ini');
+
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      [
+        '[extensions]',
+        'loaded = [',
+        '    "bouncer",',
+        '    "offline-messaging",',
+        ']',
+        '',
+      ].join('\n')
+    );
+
+    const result = spawnSync(
+      '/bin/sh',
+      [
+        'docker-entrypoint.sh',
+        'sh',
+        '-c',
+        'test "$(grep -c \'"offline-messaging"\' "$KIWIBNC_DATA_DIR/.kiwibnc/config.ini")" = 1',
+      ],
+      {
+        cwd: path.resolve(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          KIWIBNC_DATA_DIR: dataDir,
+        },
+      }
+    );
+
+    expect(result.status).toBe(0);
+  });
+
+  test('adds an extensions section when persisted config lacks one', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
+    const dataDir = path.join(tmpDir, 'data');
+    const configDir = path.join(dataDir, '.kiwibnc');
+    const configPath = path.join(configDir, 'config.ini');
+
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(configPath, '[log]\nlevel="info"\n');
+
+    const result = spawnSync(
+      '/bin/sh',
+      [
+        'docker-entrypoint.sh',
+        'sh',
+        '-c',
+        'grep -q "^\\[extensions\\]$" "$KIWIBNC_DATA_DIR/.kiwibnc/config.ini" && grep -q \'"offline-messaging"\' "$KIWIBNC_DATA_DIR/.kiwibnc/config.ini"',
+      ],
+      {
+        cwd: path.resolve(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          KIWIBNC_DATA_DIR: dataDir,
+        },
+      }
+    );
+
+    expect(result.status).toBe(0);
+  });
+
   test('forwards termination signals to the supervised app process', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
     const binDir = path.join(tmpDir, 'bin');
