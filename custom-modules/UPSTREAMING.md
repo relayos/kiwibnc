@@ -125,6 +125,50 @@ Scope:
 This branch is intentionally separate from SQL user database support because it
 is a small data-model behavior fix with no SQL dependency.
 
+### SQLite Retention Cleanup Timer
+
+Branch name:
+
+- `upstreamable/sqlite-retention-cleanup-timer`
+
+Files:
+
+- `src/worker/messagestores/sqlite.js`
+- `tests/unit/sqlite_messagestore.js`
+
+Scope:
+
+- Track the SQLite message-retention cleanup interval so tests and shutdown
+  paths can close it explicitly.
+- Add a `close()` helper that clears the interval and closes the SQLite handle.
+
+This branch is intentionally separate from custom message-store work because it
+only fixes local SQLite resource cleanup and does not affect message-store
+selection semantics.
+
+### Custom Message Store Read Precedence
+
+Branch name:
+
+- `upstreamable/custom-message-store-read-precedence`
+
+Files:
+
+- `src/worker/messagestores/index.js`
+- `tests/unit/messagestores.js`
+
+Scope:
+
+- When multiple readable message stores are configured, prefer the last loaded
+  readable store for history reads.
+- This lets `logging.custom` overlays own `CHATHISTORY` reads while preserving
+  existing SQLite or flat-file write fanout.
+
+This branch is intentionally generic: it should not mention MariaDB, RelayOS,
+WordPress, or any product-specific custom module. The RelayBNC MariaDB store
+depends on this seam, but the behavior is useful for any KiwiBNC custom message
+store.
+
 ## RelayBNC-Only Lanes
 
 ### Distro Image And CI
