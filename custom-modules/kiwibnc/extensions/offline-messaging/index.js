@@ -96,7 +96,7 @@ async function lookupRecipient(app, target, con) {
 
     const row = await db.dbUsers('user_networks')
         .innerJoin('users', 'users.id', 'user_networks.user_id')
-        .whereRaw('LOWER(users.username) = LOWER(?)', [target])
+        .where('users.username', target)
         .whereNotNull('users.wp_user_id')
         .where('user_networks.name', DEFAULT_NETWORK_NAME)
         .select(

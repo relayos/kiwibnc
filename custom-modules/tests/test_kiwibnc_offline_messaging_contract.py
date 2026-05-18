@@ -49,7 +49,7 @@ class KiwiBncOfflineMessagingContractTests(unittest.TestCase):
             self.assertIn(snippet, text)
 
         self.assertNotIn(".where('users.username', 'LIKE', target)", text)
-        self.assertIn(".whereRaw('LOWER(users.username) = LOWER(?)', [target])", text)
+        self.assertIn(".where('users.username', target)", text)
 
     def test_extension_only_treats_connected_recipient_upstream_as_online(self):
         text = self.read_module()
