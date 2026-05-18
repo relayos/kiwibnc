@@ -32,6 +32,45 @@ describe('docker-entrypoint', () => {
     expect(result.status).toBe(0);
   });
 
+  test('patches persisted config to load offline messaging before launching app', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
+    const dataDir = path.join(tmpDir, 'data');
+    const configDir = path.join(dataDir, '.kiwibnc');
+    const configPath = path.join(configDir, 'config.ini');
+
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      [
+        '[extensions]',
+        'loaded = [',
+        '    "bouncer",',
+        '    "webchat",',
+        ']',
+        '',
+      ].join('\n')
+    );
+
+    const result = spawnSync(
+      '/bin/sh',
+      [
+        'docker-entrypoint.sh',
+        'sh',
+        '-c',
+        'grep -q \'"offline-messaging"\' "$KIWIBNC_DATA_DIR/.kiwibnc/config.ini"',
+      ],
+      {
+        cwd: path.resolve(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          KIWIBNC_DATA_DIR: dataDir,
+        },
+      }
+    );
+
+    expect(result.status).toBe(0);
+  });
+
   test('forwards termination signals to the supervised app process', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiwibnc-entrypoint-'));
     const binDir = path.join(tmpDir, 'bin');

@@ -49,4 +49,15 @@ describe('custom module packaging', () => {
         expect(template).not.toContain('[message_store_mariadb]');
         expect(template).not.toContain('messages_table="bnc_messages"');
     });
+
+    test('loads the offline messaging extension in the default config template', () => {
+        const template = fs.readFileSync(
+            path.join(repoRoot, 'src/configProfileTemplate/config.ini'),
+            'utf8'
+        );
+        const extensionsSection = template.match(/^\[extensions\]\nloaded = \[([\s\S]*?)\]/m);
+
+        expect(extensionsSection).not.toBeNull();
+        expect(extensionsSection[1]).toContain('"offline-messaging"');
+    });
 });

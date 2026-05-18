@@ -283,6 +283,60 @@ class MariaDbMessageStore {
         }
     }
 
+    async storeOfflineDirectMessage(opts) {
+        const row = this.offlineDirectMessageRow(opts || {});
+        if (!row) {
+            return false;
+        }
+
+        const messagesTmr = this.stats.timerStart('store.time');
+        try {
+            await this.messagesQuery(
+                `INSERT INTO \`${this.tableName}\`
+                 (user_id, network_id, buffer, buffer_lower, time, type, msgid, msgtags, prefix, params, data)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    row.user_id,
+                    row.network_id,
+                    row.buffer,
+                    row.buffer_lower,
+                    row.time,
+                    row.type,
+                    row.msgid,
+                    row.msgtags,
+                    row.prefix,
+                    row.params,
+                    row.data,
+                ]
+            );
+            return true;
+        } finally {
+            messagesTmr.stop();
+        }
+    }
+
+    offlineDirectMessageRow(opts) {
+        if (!opts.recipientUserId || !opts.recipientNetworkId || !opts.senderUsername || !opts.targetUsername || !opts.text) {
+            return null;
+        }
+
+        const tags = opts.tags || {};
+        const time = opts.time || (new Date(tags.time || Helpers.isoTime())).getTime();
+        return {
+            user_id: opts.recipientUserId,
+            network_id: opts.recipientNetworkId,
+            buffer: opts.senderUsername,
+            buffer_lower: this.normalizeBuffer(opts.senderUsername),
+            time,
+            type: MSG_TYPE_PRIVMSG,
+            msgid: opts.msgid || '',
+            msgtags: JSON.stringify(tags),
+            prefix: opts.senderUsername,
+            params: opts.targetUsername,
+            data: opts.text,
+        };
+    }
+
     rowFromMessage(message, upstreamCon, clientCon) {
         if (!message || !message.command || !message.params) {
             return null;

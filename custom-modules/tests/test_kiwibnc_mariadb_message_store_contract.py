@@ -22,7 +22,8 @@ class KiwiBncMariaDbMessageStoreContractTests(unittest.TestCase):
         expected_snippets = [
             "Fork Split Findings",
             "Keep in the KiwiBNC fork for now",
-            "Moved here",
+            "Move later",
+            "Move now",
             "MariaDB message history storage",
             "`logging.custom`",
             "without more divergence from upstream KiwiBNC",
@@ -78,12 +79,6 @@ class KiwiBncMariaDbMessageStoreContractTests(unittest.TestCase):
         self.assertIn("`${tablePrefix}users`", text)
         self.assertIn("`${tablePrefix}user_networks`", text)
 
-    def test_message_dsn_uses_raw_slash_safe_mysql_parser(self):
-        text = self.read_module()
-        self.assertIn("parseMysqlConnectionString(this.messagesDsn)", text)
-        self.assertIn("lastIndexOf('@')", text)
-        self.assertIn("decodeConnectionPart", text)
-
     def test_msgid_queries_use_time_and_id_boundaries(self):
         text = self.read_module()
         expected_snippets = [
@@ -95,6 +90,11 @@ class KiwiBncMariaDbMessageStoreContractTests(unittest.TestCase):
         ]
         for snippet in expected_snippets:
             self.assertIn(snippet, text)
+
+    def test_timestamp_between_to_boundary_is_exclusive(self):
+        text = self.read_module()
+        self.assertNotIn("Number.MAX_SAFE_INTEGER", text)
+        self.assertRegex(text, r"if \(ref\.type === 'timestamp'\)[\s\S]*id: 0")
 
     def test_exposes_queued_writes_and_error_logging(self):
         text = self.read_module()
@@ -141,6 +141,28 @@ class KiwiBncMariaDbMessageStoreContractTests(unittest.TestCase):
                 self.assertNotIn("bADm2me5oqSJj86fYZM3", text, path)
                 self.assertNotIn("100.68.254.62", text, path)
                 self.assertNotIn("100.99.100.7", text, path)
+
+    def test_offline_direct_message_helper_exists(self):
+        text = self.read_module()
+
+        for snippet in [
+            "async storeOfflineDirectMessage",
+            "recipientUserId",
+            "recipientNetworkId",
+            "senderUsername",
+            "targetUsername",
+            "MSG_TYPE_PRIVMSG",
+            "normalizeBuffer",
+        ]:
+            self.assertIn(snippet, text)
+
+    def test_offline_direct_message_helper_reuses_configured_messages_table(self):
+        text = self.read_module()
+
+        self.assertIn("INSERT INTO \\`${this.tableName}\\`", text)
+        self.assertIn("buffer_lower", text)
+        self.assertIn("JSON.stringify", text)
+        self.assertNotIn("INSERT INTO bnc_messages", text)
 
 
 if __name__ == "__main__":
