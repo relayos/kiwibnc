@@ -38,6 +38,13 @@ describe('custom module packaging', () => {
         expect(dockerfile).toContain('/app/src/worker/messagestores/mariadb.js');
     });
 
+    test('packages RelayBNC entitlement resolver and badges', () => {
+        expect(fs.existsSync(path.join(repoRoot, 'custom-modules/kiwibnc/libs/relayos_entitlements.js'))).toBe(true);
+        expect(fs.existsSync(path.join(repoRoot, 'custom-modules/kiwibnc/extensions/webchat/relayos_badges.js'))).toBe(true);
+        const dockerfile = fs.readFileSync(path.join(repoRoot, 'Dockerfile'), 'utf8');
+        expect(dockerfile).toContain('COPY custom-modules/kiwibnc/ /app/src/');
+    });
+
     test('keeps custom message-store defaults out of core config template', () => {
         const template = fs.readFileSync(
             path.join(repoRoot, 'src/configProfileTemplate/config.ini'),

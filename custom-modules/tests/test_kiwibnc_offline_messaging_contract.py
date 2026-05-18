@@ -4,6 +4,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "kiwibnc/extensions/offline-messaging/index.js"
+ENTITLEMENTS_PATH = REPO_ROOT / "kiwibnc/libs/relayos_entitlements.js"
 
 
 class KiwiBncOfflineMessagingContractTests(unittest.TestCase):
@@ -13,6 +14,13 @@ class KiwiBncOfflineMessagingContractTests(unittest.TestCase):
             "Expected offline messaging extension at kiwibnc/extensions/offline-messaging/index.js",
         )
         return MODULE_PATH.read_text()
+
+    def read_entitlements_module(self):
+        self.assertTrue(
+            ENTITLEMENTS_PATH.is_file(),
+            "Expected RelayOS entitlement resolver at kiwibnc/libs/relayos_entitlements.js",
+        )
+        return ENTITLEMENTS_PATH.read_text()
 
     def test_extension_hooks_message_from_client(self):
         text = self.read_module()
@@ -69,6 +77,28 @@ class KiwiBncOfflineMessagingContractTests(unittest.TestCase):
             "msgIdGenerator.generateId()",
         ]:
             self.assertIn(snippet, text)
+
+    def test_extension_gates_offline_messaging_with_relayos_entitlements(self):
+        text = self.read_module()
+        entitlements_text = self.read_entitlements_module()
+
+        for snippet in [
+            "RelayosEntitlements",
+            "await entitlements.init()",
+            "catch (err)",
+            "Failed to evaluate offline direct message entitlement:",
+            "canQueueOfflineDirectMessage",
+            "canQueueOfflineDirectMessage(sender, recipient)",
+            "Async messaging is not enabled for this conversation.",
+            "senderUser",
+        ]:
+            self.assertIn(snippet, text)
+
+        for snippet in [
+            "const recipientCapabilities = await this.getUserCapabilities(recipient)",
+            "recipientCapabilities.includes('async_message.receive_from_anyone')",
+        ]:
+            self.assertIn(snippet, entitlements_text)
 
 
 if __name__ == "__main__":

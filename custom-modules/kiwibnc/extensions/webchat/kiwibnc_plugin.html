@@ -142,6 +142,68 @@
 </template>
 
 <script>
+    function relayosCountryFlag(countryCode) {
+        const code = String(countryCode || '').trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(code)) {
+            return '';
+        }
+
+        return String.fromCodePoint(
+            127397 + code.charCodeAt(0),
+            127397 + code.charCodeAt(1)
+        );
+    }
+
+    function relayosBadgesFromMetadata(metadata) {
+        const badges = [];
+        const safeMetadata = metadata || {};
+        const countryFlag = relayosCountryFlag(safeMetadata['geo/country-code']);
+
+        if (countryFlag) {
+            badges.push(countryFlag);
+        }
+
+        if (safeMetadata['entitlement/lucky']) {
+            badges.push('🍀');
+        }
+
+        return badges;
+    }
+
+    window.relayosCountryFlag = relayosCountryFlag;
+    window.relayosBadgesFromMetadata = relayosBadgesFromMetadata;
+
+    function relayosApplyBadges(root) {
+        if (!root) {
+            return;
+        }
+
+        const nodes = [];
+        if (root.matches && root.matches('[data-relayos-metadata]')) {
+            nodes.push(root);
+        }
+        if (root.querySelectorAll) {
+            root.querySelectorAll('[data-relayos-metadata]').forEach((node) => {
+                nodes.push(node);
+            });
+        }
+
+        nodes.forEach((node) => {
+            let metadata = null;
+            try {
+                metadata = JSON.parse(node.getAttribute('data-relayos-metadata') || '{}');
+            } catch (err) {
+                return;
+            }
+
+            const badges = relayosBadgesFromMetadata(metadata);
+            const value = badges.join('');
+            if (node.getAttribute('data-relayos-badges') !== value) {
+                node.setAttribute('data-relayos-badges', value);
+            }
+        });
+    }
+
     kiwi.plugin('kiwibnc', function(kiwi, log) {
         const basePath = kiwi.state.settings.plugins.find(p => p.name === 'kiwibnc').basePath;
         const InputText = kiwi.require('components/utils/InputText');
@@ -654,6 +716,18 @@
                 kiwi.addTab('settings', 'KiwiBNC Admin', AdminScreen);
             }
         });
+
+        relayosApplyBadges(document);
+        if (window.MutationObserver && document.body) {
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                        relayosApplyBadges(node);
+                    });
+                });
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
     });
 </script>
 

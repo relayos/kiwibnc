@@ -2,14 +2,21 @@
 
 const { mParam } = require('../../libs/helpers');
 const msgIdGenerator = require('../../libs/msgIdGenerator');
+const RelayosEntitlements = require('../../libs/relayos_entitlements');
 
 const DEFAULT_NETWORK_NAME = 'RelayOS';
 const CHANNEL_PREFIXES = new Set(['#', '&', '+', '!']);
 
 let logger = null;
+let entitlements = null;
 
 module.exports.init = async function init(hooks, app) {
     logger = global.l || console;
+    entitlements = new RelayosEntitlements({
+        db: app && app.db && app.db.dbUsers,
+        logger,
+    });
+    await entitlements.init();
     hooks.on('message_from_client', async event => handleMessageFromClient(event, app));
 };
 
@@ -26,7 +33,8 @@ async function handleMessageFromClient(event, app) {
         return;
     }
 
-    const senderUsername = await senderCanonicalUsername(con, app);
+    const sender = await senderUser(con, app);
+    const senderUsername = sender && sender.username ? sender.username : '';
     if (!senderUsername || target.toLowerCase() === senderUsername.toLowerCase()) {
         return;
     }
@@ -38,6 +46,23 @@ async function handleMessageFromClient(event, app) {
 
     if (isRecipientOnline(app, recipient)) {
         return;
+    }
+
+    if (entitlements) {
+        try {
+            if (!(await entitlements.canQueueOfflineDirectMessage(sender, recipient))) {
+                event.preventDefault();
+                event.passthru = false;
+                sendNotice(con, 'Async messaging is not enabled for this conversation.');
+                return;
+            }
+        } catch (err) {
+            event.preventDefault();
+            event.passthru = false;
+            logger.error('Failed to evaluate offline direct message entitlement:', err && err.stack ? err.stack : err);
+            sendNotice(con, 'Async messaging is not enabled for this conversation.');
+            return;
+        }
     }
 
     event.preventDefault();
@@ -71,7 +96,7 @@ function isChannelTarget(target) {
     return CHANNEL_PREFIXES.has(target[0]);
 }
 
-async function senderCanonicalUsername(con, app) {
+async function senderUser(con, app) {
     const db = userDatabase(app, con);
     const state = con && con.state;
     const userId = state && state.authUserId;
@@ -81,11 +106,17 @@ async function senderCanonicalUsername(con, app) {
     }
 
     const row = await db.dbUsers('users')
-        .where('id', userId)
-        .select('username')
+        .innerJoin('user_networks', 'user_networks.user_id', 'users.id')
+        .where('users.id', userId)
+        .where('user_networks.id', networkId)
+        .select(
+            'users.id',
+            'users.username',
+            'users.wp_user_id'
+        )
         .first();
 
-    return row && row.username ? row.username : '';
+    return row && row.username ? row : null;
 }
 
 async function lookupRecipient(app, target, con) {

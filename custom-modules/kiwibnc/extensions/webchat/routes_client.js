@@ -92,6 +92,14 @@ module.exports = function(app, oauthClientConf) {
         );
     });
 
+    router.get('kiwi.relayos_badges', '/relayos_badges.js', async (ctx, next) => {
+        ctx.type = 'application/javascript';
+        ctx.body = await fs.readFile(
+            path.join(__dirname, 'relayos_badges.js'),
+            { encoding: 'utf8' },
+        );
+    });
+
     router.get('kiwi.config', '/static/config.json', async (ctx, next) => {
         let config = await fs.readFile(path.join(publicPath, 'static', 'config.json'));
         config = JSON.parse(config);
