@@ -78,6 +78,12 @@ class KiwiBncMariaDbMessageStoreContractTests(unittest.TestCase):
         self.assertIn("`${tablePrefix}users`", text)
         self.assertIn("`${tablePrefix}user_networks`", text)
 
+    def test_message_dsn_uses_raw_slash_safe_mysql_parser(self):
+        text = self.read_module()
+        self.assertIn("parseMysqlConnectionString(this.messagesDsn)", text)
+        self.assertIn("lastIndexOf('@')", text)
+        self.assertIn("decodeConnectionPart", text)
+
     def test_msgid_queries_use_time_and_id_boundaries(self):
         text = self.read_module()
         expected_snippets = [
