@@ -22,6 +22,10 @@ jest.mock('/virtual/custom-message-store.js', () => jest.fn().mockImplementation
 })), { virtual: true });
 
 const MessageStores = require('../../src/worker/messagestores/');
+const fs = require('fs');
+const path = require('path');
+
+const repoRoot = path.resolve(__dirname, '..', '..');
 
 describe('MessageStores', () => {
     function buildConfig() {
@@ -48,5 +52,13 @@ describe('MessageStores', () => {
         await stores.init();
 
         await expect(stores.getMessagesBetween(1, 2, '#test', {}, {}, 10)).resolves.toEqual(['custom']);
+    });
+
+    test('documents custom readable precedence as an upstreamable core seam', () => {
+        const upstreaming = fs.readFileSync(path.join(repoRoot, 'custom-modules/UPSTREAMING.md'), 'utf8');
+
+        expect(upstreaming).toContain('Custom Message Store Read Precedence');
+        expect(upstreaming).toContain('src/worker/messagestores/index.js');
+        expect(upstreaming).toContain('tests/unit/messagestores.js');
     });
 });
