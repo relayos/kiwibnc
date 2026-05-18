@@ -125,6 +125,29 @@ Scope:
 This branch is intentionally separate from SQL user database support because it
 is a small data-model behavior fix with no SQL dependency.
 
+### Custom Message Store Read Precedence
+
+Branch name:
+
+- `upstreamable/custom-message-store-read-precedence`
+
+Files:
+
+- `src/worker/messagestores/index.js`
+- `tests/unit/messagestores.js`
+
+Scope:
+
+- When multiple readable message stores are configured, prefer the last loaded
+  readable store for history reads.
+- This lets `logging.custom` overlays own `CHATHISTORY` reads while preserving
+  existing SQLite or flat-file write fanout.
+
+This branch is intentionally generic: it should not mention MariaDB, RelayOS,
+WordPress, or any product-specific custom module. The RelayBNC MariaDB store
+depends on this seam, but the behavior is useful for any KiwiBNC custom message
+store.
+
 ## RelayBNC-Only Lanes
 
 ### Distro Image And CI
