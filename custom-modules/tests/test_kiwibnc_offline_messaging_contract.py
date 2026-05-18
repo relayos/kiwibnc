@@ -52,18 +52,20 @@ class KiwiBncOfflineMessagingContractTests(unittest.TestCase):
             "dbUsers('user_networks')",
             "wp_user_id",
             "RelayOS",
-            "findUsersOutgoingConnection",
+            "findAllUsersClients",
         ]:
             self.assertIn(snippet, text)
 
         self.assertNotIn(".where('users.username', 'LIKE', target)", text)
         self.assertIn(".where('users.username', target)", text)
 
-    def test_extension_only_treats_connected_recipient_upstream_as_online(self):
+    def test_extension_treats_attached_recipient_clients_as_online(self):
         text = self.read_module()
 
-        self.assertIn("const upstream = app.cons.findUsersOutgoingConnection", text)
-        self.assertIn("upstream.state.connected", text)
+        self.assertIn("const clients = app.cons.findAllUsersClients", text)
+        self.assertIn("client.state.authNetworkId === recipient.network_id", text)
+        self.assertIn("client.state.netRegistered", text)
+        self.assertNotIn("const upstream = app.cons.findUsersOutgoingConnection", text)
 
     def test_extension_calls_message_store_helper_and_acknowledges_sender(self):
         text = self.read_module()

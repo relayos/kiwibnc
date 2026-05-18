@@ -147,12 +147,14 @@ async function lookupRecipient(app, target, con) {
 }
 
 function isRecipientOnline(app, recipient) {
-    if (!app || !app.cons || typeof app.cons.findUsersOutgoingConnection !== 'function') {
+    if (!app || !app.cons || typeof app.cons.findAllUsersClients !== 'function') {
         return false;
     }
 
-    const upstream = app.cons.findUsersOutgoingConnection(recipient.user_id, recipient.network_id);
-    return !!(upstream && upstream.state && upstream.state.connected);
+    const clients = app.cons.findAllUsersClients(recipient.user_id);
+    return clients.some(client => client && client.state
+        && client.state.authNetworkId === recipient.network_id
+        && client.state.netRegistered);
 }
 
 function findOfflineMessageStore(app, con) {
