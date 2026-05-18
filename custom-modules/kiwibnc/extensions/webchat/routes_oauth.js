@@ -4,6 +4,7 @@ const https = require('https');
 const { URL, URLSearchParams } = require('url');
 const createLogger = require('../../libs/logger');
 const Helpers = require('../../libs/helpers');
+const { ensureBncWordPressProvisioning } = require('./provision_bnc');
 const l = createLogger('webchat-oauth');
 
 function parseBool(value, def) {
@@ -245,124 +246,6 @@ function getUserId(user) {
     return user ? user.id : undefined;
 }
 
-function quotedIdentifier(knex, name) {
-    return knex.client.wrapIdentifier(name, (value) => `\`${value.replace(/`/g, '``')}\``);
-}
-
-function unquotedIdentifier(knex, name) {
-    return quotedIdentifier(knex, name).replace(/^`|`$/g, '').replace(/``/g, '`');
-}
-
-function quoteConstraint(name) {
-    return `\`${name.replace(/`/g, '``')}\``;
-}
-
-async function addUserChildForeignKey(knex, tableName) {
-    const usersTableName = unquotedIdentifier(knex, 'users');
-    const childTableName = unquotedIdentifier(knex, tableName);
-    const childTable = quotedIdentifier(knex, tableName);
-    const usersTable = quotedIdentifier(knex, 'users');
-    const constraintName = `${childTableName}_user_id_fk`;
-
-    await knex.raw(
-        `DELETE child
-           FROM ${childTable} child
-           LEFT JOIN ${usersTable} users ON users.id = child.user_id
-          WHERE child.user_id IS NULL OR users.id IS NULL`
-    );
-
-    await knex.raw(`ALTER TABLE ${childTable} MODIFY COLUMN user_id INT(10) UNSIGNED NOT NULL`);
-
-    const constraints = await knex.raw(
-        `SELECT CONSTRAINT_NAME
-           FROM information_schema.KEY_COLUMN_USAGE
-          WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = ?
-            AND COLUMN_NAME = 'user_id'
-            AND REFERENCED_TABLE_NAME = ?
-            AND REFERENCED_COLUMN_NAME = 'id'`,
-        [childTableName, usersTableName]
-    );
-    const rows = Array.isArray(constraints) ? constraints[0] : constraints.rows;
-    if (rows && rows.length) {
-        return;
-    }
-
-    await knex.raw(
-        `ALTER TABLE ${childTable}
-          ADD CONSTRAINT ${quoteConstraint(constraintName)}
-          FOREIGN KEY (user_id)
-          REFERENCES ${usersTable} (id)
-          ON DELETE CASCADE
-          ON UPDATE CASCADE`
-    );
-}
-
-async function ensureWordPressLinkage(app) {
-    const knex = app.db && app.db.dbUsers;
-    if (!knex || !knex.schema) {
-        return;
-    }
-
-    const hasColumn = await knex.schema.hasColumn('users', 'wp_user_id');
-    if (!hasColumn) {
-        await knex.schema.table('users', function (table) {
-            table.bigInteger('wp_user_id').unsigned().nullable().index();
-        });
-    }
-
-    if (knex.client.config.client !== 'mysql') {
-        return;
-    }
-
-    const usersTable = quotedIdentifier(knex, 'users');
-    const usersTableName = unquotedIdentifier(knex, 'users');
-    await knex.raw(`ALTER TABLE ${usersTable} MODIFY COLUMN wp_user_id BIGINT(20) UNSIGNED NULL`);
-    await knex.raw(
-        `UPDATE ${usersTable} bnc
-            JOIN wp_users wp ON LOWER(wp.user_login) = LOWER(bnc.username)
-           SET bnc.wp_user_id = wp.ID
-         WHERE bnc.wp_user_id IS NULL`
-    );
-
-    const constraints = await knex.raw(
-        `SELECT CONSTRAINT_NAME
-           FROM information_schema.KEY_COLUMN_USAGE
-          WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = ?
-            AND COLUMN_NAME = 'wp_user_id'
-            AND REFERENCED_TABLE_NAME = 'wp_users'`,
-        [usersTableName]
-    );
-    const rows = Array.isArray(constraints) ? constraints[0] : constraints.rows;
-    if (!rows || !rows.length) {
-        await knex.schema.table('users', function (table) {
-            table.foreign('wp_user_id')
-                .references('ID')
-                .inTable('wp_users')
-                .onDelete('CASCADE')
-                .onUpdate('CASCADE');
-        });
-    }
-
-    await addUserChildForeignKey(knex, 'user_networks');
-    await addUserChildForeignKey(knex, 'user_tokens');
-}
-
-async function getWordPressUserId(app, userId) {
-    const row = await app.db.dbUsers('users')
-        .select('wp_user_id')
-        .where('id', userId)
-        .first();
-    return row ? row.wp_user_id : null;
-}
-
-async function setWordPressUserId(app, userId, wpUserId) {
-    await app.db.dbUsers('users')
-        .where('id', userId)
-        .update({ wp_user_id: wpUserId });
-}
-
 async function ensureDefaultNetwork(app, user, defaultNetwork) {
     const userId = getUserId(user);
     const existing = await app.userDb.getNetworkByName(userId, defaultNetwork.name);
@@ -377,10 +260,12 @@ async function ensureOAuthUser(app, identity, defaultNetwork) {
     const username = identity.username;
     let user = await app.userDb.getUser(username);
     if (!user) {
-        user = await app.userDb.addUser(username, generateUnusablePassword(), false);
-        await setWordPressUserId(app, getUserId(user), identity.wpUserId);
-    } else if (!await getWordPressUserId(app, getUserId(user))) {
-        await setWordPressUserId(app, getUserId(user), identity.wpUserId);
+        user = await app.userDb.addUser(username, generateUnusablePassword(), false, {
+            wp_user_id: identity.wpUserId,
+        });
+    } else if (!user.wp_user_id && typeof app.userDb.setUserWordPressId === 'function') {
+        await app.userDb.setUserWordPressId(getUserId(user), identity.wpUserId);
+        user.wp_user_id = identity.wpUserId;
     }
 
     await ensureDefaultNetwork(app, user, defaultNetwork);
@@ -388,8 +273,12 @@ async function ensureOAuthUser(app, identity, defaultNetwork) {
     return user;
 }
 
-function registerRoutes(app, oauthConf = null) {
-    oauthConf = oauthConf || buildOauthConfig(app);
+async function ensureWordPressLinkage(app, defaultNetwork = buildDefaultNetwork({})) {
+    return ensureBncWordPressProvisioning(app, defaultNetwork);
+}
+
+function registerRoutes(app) {
+    const oauthConf = buildOauthConfig(app);
 
     if (!oauthConf) {
         l.info('OAuth config missing; skipping OAuth routes');
@@ -501,11 +390,13 @@ module.exports = {
     registerRoutes,
     getClientConfig,
     buildOauthConfig,
+    ensureBncWordPressProvisioning,
     ensureWordPressLinkage,
     __testHooks: {
         resolveWordPressIdentity,
         ensureOAuthUser,
-        ensureWordPressLinkage,
         buildDefaultNetwork,
+        ensureBncWordPressProvisioning,
+        ensureWordPressLinkage,
     },
 };

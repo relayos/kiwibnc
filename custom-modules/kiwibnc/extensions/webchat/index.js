@@ -8,7 +8,6 @@ const routesClient = require('./routes_client');
 const {
     registerRoutes: registerOauthRoutes,
     getClientConfig: getOauthClientConfig,
-    buildOauthConfig,
     ensureWordPressLinkage,
 } = require('./routes_oauth');
 
@@ -20,11 +19,10 @@ module.exports.init = async function init(hooks, app) {
 
     await downloadKiwiIrc(publicPath, app.conf.get('webchat.download_url', ''));
 
-    const oauthConf = buildOauthConfig(app);
+    const oauthConf = registerOauthRoutes(app);
     if (oauthConf) {
-        await ensureWordPressLinkage(app);
+        await ensureWordPressLinkage(app, oauthConf.defaultNetwork);
     }
-    registerOauthRoutes(app, oauthConf);
     const oauthClientConf = getOauthClientConfig(oauthConf);
 
     routesAdmin(app);

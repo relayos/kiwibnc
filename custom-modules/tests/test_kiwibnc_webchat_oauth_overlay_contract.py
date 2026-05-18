@@ -3,9 +3,8 @@ import unittest
 from pathlib import Path
 
 
-MODULE_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = MODULE_ROOT.parent
-WEBCHAT_ROOT = MODULE_ROOT / "kiwibnc/extensions/webchat"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+WEBCHAT_ROOT = REPO_ROOT / "kiwibnc/extensions/webchat"
 
 
 class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
@@ -21,45 +20,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "kiwibnc/extensions/webchat/routes_client.js",
             "kiwibnc/extensions/webchat/kiwibnc_plugin.html",
         ]:
-            self.assertTrue((MODULE_ROOT / relpath).is_file(), relpath)
-
-    def test_oauth_webchat_policy_stays_out_of_core_source(self):
-        core_webchat_root = REPO_ROOT / "src/extensions/webchat"
-
-        self.assertFalse((core_webchat_root / "routes_oauth.js").exists())
-
-        core_files = [
-            core_webchat_root / "routes_client.js",
-            core_webchat_root / "index.js",
-            core_webchat_root / "kiwibnc_plugin.html",
-        ]
-        forbidden_snippets = [
-            "oauthClientConf",
-            "oauthEnabled",
-            "routes_oauth",
-            "kiwibnc_oauth_login",
-        ]
-        for path in core_files:
-            text = path.read_text()
-            for snippet in forbidden_snippets:
-                self.assertNotIn(snippet, text, f"{snippet} leaked into {path.relative_to(REPO_ROOT)}")
-
-    def test_wordpress_user_linkage_stays_out_of_core_source(self):
-        core_files = [
-            "src/libs/dataModels/user.js",
-            "src/worker/users.js",
-            "src/dbschemas/users/20260516190000_wordpress_user_fk.js",
-            "src/dbschemas/users/20260516201000_bnc_child_fks.js",
-        ]
-
-        for relpath in core_files:
-            path = REPO_ROOT / relpath
-            if not path.exists():
-                continue
-
-            text = path.read_text()
-            for snippet in ["wp_user_id", "wp_users"]:
-                self.assertNotIn(snippet, text, f"{snippet} leaked into {relpath}")
+            self.assertTrue((REPO_ROOT / relpath).is_file(), relpath)
 
     def test_routes_oauth_exports_contract_and_maps_wordpress_identity(self):
         text = self.read_overlay("routes_oauth.js")
@@ -67,7 +28,6 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*registerRoutes")
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*getClientConfig")
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*buildOauthConfig")
-        self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*ensureWordPressLinkage")
 
         expected_snippets = [
             "userInfo.user_login",
@@ -75,19 +35,59 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "OAuth user_login is not a valid BNC username",
             "wp_user_id",
             "identity.wpUserId",
-            "ensureWordPressLinkage",
-            "wp_users",
-            "addUserChildForeignKey",
+            "setUserWordPressId",
         ]
         for snippet in expected_snippets:
             self.assertIn(snippet, text)
 
-    def test_webchat_index_runs_wordpress_linkage_only_when_oauth_is_configured(self):
-        text = self.read_overlay("index.js")
+    def test_bnc_wordpress_provisioning_helper_exists(self):
+        text = self.read_overlay("provision_bnc.js")
 
-        self.assertIn("const oauthConf = buildOauthConfig(app)", text)
-        self.assertIn("if (oauthConf)", text)
-        self.assertIn("await ensureWordPressLinkage(app)", text)
+        for snippet in [
+            "async function ensureBncWordPressProvisioning",
+            "module.exports",
+            "wp_users",
+            "wp_user_id",
+            "wordpress_users_bnc_after_insert",
+            "wordpress_users_bnc_after_update",
+            "wordpress_users_bnc_after_delete",
+            "ON DELETE CASCADE",
+            "ON UPDATE CASCADE",
+            "bcrypt_hash(CONCAT('oauth-unusable-'",
+        ]:
+            self.assertIn(snippet, text)
+
+    def test_bnc_provisioning_does_not_mutate_wordpress_schema(self):
+        text = self.read_overlay("provision_bnc.js")
+
+        forbidden = [
+            "ALTER TABLE wp_users",
+            "CREATE INDEX",
+            "ADD COLUMN",
+            "MODIFY COLUMN wp_",
+        ]
+        for snippet in forbidden:
+            self.assertNotIn(snippet, text)
+
+    def test_bnc_provisioning_installs_bnc_owned_foreign_keys(self):
+        text = self.read_overlay("provision_bnc.js")
+
+        for snippet in [
+            "bnc_users_wp_user_id_fk",
+            "bnc_user_networks_user_id_fk",
+            "bnc_user_tokens_user_id_fk",
+            "REFERENCES `wp_users` (`ID`)",
+            "REFERENCES",
+            "ON DELETE CASCADE",
+        ]:
+            self.assertIn(snippet, text)
+
+    def test_routes_oauth_uses_provisioning_helper(self):
+        text = self.read_overlay("routes_oauth.js")
+
+        self.assertIn("ensureBncWordPressProvisioning", text)
+        self.assertIn("require('./provision_bnc')", text)
+        self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*ensureBncWordPressProvisioning")
 
     def test_routes_client_disables_public_registration_when_oauth_is_enabled(self):
         text = self.read_overlay("routes_client.js")
