@@ -96,7 +96,7 @@ async function lookupRecipient(app, target, con) {
 
     const row = await db.dbUsers('user_networks')
         .innerJoin('users', 'users.id', 'user_networks.user_id')
-        .where('users.username', 'LIKE', target)
+        .whereRaw('LOWER(users.username) = LOWER(?)', [target])
         .whereNotNull('users.wp_user_id')
         .where('user_networks.name', DEFAULT_NETWORK_NAME)
         .select(
@@ -120,7 +120,8 @@ function isRecipientOnline(app, recipient) {
         return false;
     }
 
-    return !!app.cons.findUsersOutgoingConnection(recipient.user_id, recipient.network_id);
+    const upstream = app.cons.findUsersOutgoingConnection(recipient.user_id, recipient.network_id);
+    return !!(upstream && upstream.state && upstream.state.connected);
 }
 
 function findOfflineMessageStore(app, con) {
