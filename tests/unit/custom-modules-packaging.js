@@ -31,6 +31,24 @@ describe('custom module packaging', () => {
         expect(woodpecker).toContain("python3 -m unittest discover -s custom-modules/tests -p 'test_kiwibnc_*.py' -v");
     });
 
+    test('vendors only KiwiBNC custom module contract tests', () => {
+        const testsDir = path.join(repoRoot, 'custom-modules/tests');
+        const contractTests = fs.readdirSync(testsDir)
+            .filter((name) => /^test_.*\.py$/.test(name));
+
+        expect(contractTests).toEqual(expect.arrayContaining([
+            'test_kiwibnc_entitlements_contract.py',
+            'test_kiwibnc_mariadb_message_store_contract.py',
+            'test_kiwibnc_offline_messaging_contract.py',
+            'test_kiwibnc_webchat_oauth_overlay_contract.py',
+        ]));
+        expect(contractTests.every((name) => name.startsWith('test_kiwibnc_'))).toBe(true);
+        expect(contractTests).not.toEqual(expect.arrayContaining([
+            'test_inspircd_module_contract.py',
+            'test_kiwi_overlay_contract.py',
+        ]));
+    });
+
     test('copies KiwiBNC custom modules into the runtime source tree', () => {
         const dockerfile = fs.readFileSync(path.join(repoRoot, 'Dockerfile'), 'utf8');
 
