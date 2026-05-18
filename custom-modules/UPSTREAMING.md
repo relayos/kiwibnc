@@ -234,3 +234,56 @@ reconciliation plan. Do not submit them upstream.
    been represented in the integrated line.
 5. Leave RelayBNC-only distro and custom-module work on `master` until a
    dedicated distro repository exists.
+
+## Clean Main Rehearsal
+
+Branch name:
+
+- `relaybnc/clean-main-preview`
+
+Purpose:
+
+- Reconstruct the deployable RelayBNC tree from `kiwi/master` plus the
+  upstreamable and RelayBNC-only lanes.
+- Prove the reconstructed tree matches current `master` before any history
+  rewrite is considered.
+
+Merge order:
+
+1. `upstreamable/config-env-overrides`
+2. `upstreamable/sql-user-database`
+3. `upstreamable/retire-stale-users-db`
+4. `upstreamable/user-table-prefixes`
+5. `upstreamable/normalize-inserted-ids`
+6. `upstreamable/persist-network-channels`
+7. `upstreamable/sqlite-retention-cleanup-timer`
+8. `upstreamable/custom-message-store-read-precedence`
+9. `relaybnc/distro-custom-modules`
+10. `relaybnc/deployed-migration-stubs`
+11. `relaybnc/mariadb-message-store-fixes`
+12. `relaybnc/upstreaming-map-maintenance`
+
+Known conflict resolutions:
+
+- `src/libs/database.js` and `tests/unit/database.js` should resolve to the
+  integrated tree after merging SQL DSN, stale SQLite retirement, and table
+  prefix branches.
+- `tests/unit/users.js` should resolve to the integrated tree after merging
+  inserted-ID normalization and network-channel persistence.
+
+Verification:
+
+- Run the focused Jest set that covers config, database, users, message stores,
+  distro packaging, and entrypoint behavior.
+- Run `python3 -m unittest discover -s custom-modules/tests -p
+  'test_kiwibnc_*.py' -v`.
+- Confirm `git diff --quiet HEAD master` from the clean preview before treating
+  it as a candidate replacement for `master`.
+
+Rollback guardrail:
+
+- Keep `backup/master-before-clean-rebuild` pointing at the pre-rewrite
+  integrated `master` before any force update of `origin/master`.
+- Prefer `git push --force-with-lease origin relaybnc/clean-main-preview:master`
+  only after the branch has passed CI and human review. Do not use a plain
+  force push.
