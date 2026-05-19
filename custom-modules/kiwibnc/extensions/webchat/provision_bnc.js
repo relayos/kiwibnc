@@ -114,11 +114,11 @@ BEGIN
   VALUES (NEW.user_login, bcrypt_hash(CONCAT('oauth-unusable-', UUID()), 10), 0, COALESCE(UNIX_TIMESTAMP(NEW.user_registered), UNIX_TIMESTAMP()), NEW.ID)
   ON DUPLICATE KEY UPDATE username = VALUES(username), wp_user_id = VALUES(wp_user_id);
 
-  INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, channels)
-  SELECT id, ?, ?, ?, ?, username, username, username, ?
+  INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, password, sasl_account, sasl_pass, channels)
+  SELECT id, ?, ?, ?, ?, username, username, username, '', username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
     FROM ${usersTable}
    WHERE wp_user_id = NEW.ID
-  ON DUPLICATE KEY UPDATE nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname);
+  ON DUPLICATE KEY UPDATE nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname), sasl_account = VALUES(sasl_account);
 END`, [network.name, network.host, network.port, network.tls, network.channels]);
 
     await knex.raw(`
@@ -130,11 +130,11 @@ BEGIN
      SET username = NEW.user_login
    WHERE wp_user_id = NEW.ID;
 
-  INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, channels)
-  SELECT id, ?, ?, ?, ?, username, username, username, ?
+  INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, password, sasl_account, sasl_pass, channels)
+  SELECT id, ?, ?, ?, ?, username, username, username, '', username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
     FROM ${usersTable}
    WHERE wp_user_id = NEW.ID
-  ON DUPLICATE KEY UPDATE nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname);
+  ON DUPLICATE KEY UPDATE nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname), sasl_account = VALUES(sasl_account);
 END`, [network.name, network.host, network.port, network.tls, network.channels]);
 
     await knex.raw(`
@@ -169,14 +169,32 @@ async function backfillWordPressUsers(knex, defaultNetwork) {
     );
 
     await knex.raw(
-        `INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, channels)
-         SELECT bnc.id, ?, ?, ?, ?, bnc.username, bnc.username, bnc.username, ?
+        `INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, password, sasl_account, sasl_pass, channels)
+         SELECT bnc.id, ?, ?, ?, ?, bnc.username, bnc.username, bnc.username, '', bnc.username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
            FROM ${usersTable} bnc
            JOIN \`wp_users\` wp ON wp.ID = bnc.wp_user_id
            LEFT JOIN ${networksTable} net ON net.user_id = bnc.id AND net.name = ?
           WHERE net.id IS NULL`,
         [network.name, network.host, network.port, network.tls, network.channels, network.name]
     );
+}
+
+async function ensureRelayBncSaslCredentialTable(knex) {
+    await knex.raw(`
+CREATE TABLE IF NOT EXISTS ${quotedIdentifier(knex, 'relayos_bnc_sasl_credentials')} (
+  wp_user_id BIGINT UNSIGNED NOT NULL,
+  credential_hash VARCHAR(255) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  source VARCHAR(64) NOT NULL DEFAULT 'kiwibnc-oauth',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (wp_user_id),
+  KEY idx_relayos_bnc_sasl_credentials_status (status, source),
+  CONSTRAINT ${quoteConstraint('bnc_sasl_credentials_wp_user_id_fk')}
+    FOREIGN KEY (wp_user_id) REFERENCES \`wp_users\` (\`ID\`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci`);
 }
 
 async function ensureBncWordPressProvisioning(app, defaultNetwork) {
@@ -201,6 +219,7 @@ async function ensureBncWordPressProvisioning(app, defaultNetwork) {
     await ensureForeignKey(knex, 'users', 'wp_user_id', 'wp_users', 'ID', 'bnc_users_wp_user_id_fk');
     await ensureForeignKey(knex, 'user_networks', 'user_id', 'users', 'id', 'bnc_user_networks_user_id_fk');
     await ensureForeignKey(knex, 'user_tokens', 'user_id', 'users', 'id', 'bnc_user_tokens_user_id_fk');
+    await ensureRelayBncSaslCredentialTable(knex);
     await backfillWordPressUsers(knex, defaultNetwork);
     await installTriggers(knex, quotedIdentifier(knex, 'users'), quotedIdentifier(knex, 'user_networks'), defaultNetwork);
 
@@ -209,4 +228,5 @@ async function ensureBncWordPressProvisioning(app, defaultNetwork) {
 
 module.exports = {
     ensureBncWordPressProvisioning,
+    ensureRelayBncSaslCredentialTable,
 };

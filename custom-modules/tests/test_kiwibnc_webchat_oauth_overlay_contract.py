@@ -57,6 +57,39 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         ]:
             self.assertIn(snippet, text)
 
+    def test_bnc_provisioning_installs_relaybnc_sasl_credential_table(self):
+        text = self.read_overlay("provision_bnc.js")
+
+        for snippet in [
+            "relayos_bnc_sasl_credentials",
+            "credential_hash",
+            "source VARCHAR(64) NOT NULL DEFAULT 'kiwibnc-oauth'",
+            "FOREIGN KEY (wp_user_id) REFERENCES \\`wp_users\\` (\\`ID\\`)",
+            "bnc_sasl_credentials_wp_user_id_fk",
+        ]:
+            self.assertIn(snippet, text)
+
+    def test_oauth_networks_are_configured_for_upstream_sasl(self):
+        routes = self.read_overlay("routes_oauth.js")
+        provisioning = self.read_overlay("provision_bnc.js")
+
+        for snippet in [
+            "generateRelayBncSaslSecret",
+            "ensureRelayBncSaslCredential",
+            "sasl_account",
+            "sasl_pass",
+            "network.sasl_account = username",
+            "network.sasl_pass = saslSecret",
+            "await network.save()",
+        ]:
+            self.assertIn(snippet, routes)
+
+        for snippet in [
+            "sasl_account, sasl_pass",
+            "RELAYOS_BNC_SASL_UNPROVISIONED",
+        ]:
+            self.assertIn(snippet, provisioning)
+
     def test_bnc_provisioning_does_not_mutate_wordpress_schema(self):
         text = self.read_overlay("provision_bnc.js")
 

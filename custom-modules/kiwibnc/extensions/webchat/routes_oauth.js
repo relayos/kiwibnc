@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const { URL, URLSearchParams } = require('url');
+const bcrypt = require('bcrypt');
 const createLogger = require('../../libs/logger');
 const Helpers = require('../../libs/helpers');
 const { ensureBncWordPressProvisioning } = require('./provision_bnc');
@@ -225,7 +226,31 @@ function generateUnusablePassword() {
     return `oauth-unusable-${crypto.randomBytes(32).toString('hex')}`;
 }
 
-function buildUserNetwork(defaultNetwork, username) {
+function generateRelayBncSaslSecret() {
+    return `relaybnc-sasl-${crypto.randomBytes(32).toString('hex')}`;
+}
+
+async function ensureRelayBncSaslCredential(app, wpUserId, saslSecret) {
+    const knex = app.db && app.db.dbUsers;
+    if (!knex || !wpUserId || !saslSecret) {
+        return;
+    }
+
+    const credentialHash = await bcrypt.hash(saslSecret, 10);
+    await knex.raw(
+        `INSERT INTO relayos_bnc_sasl_credentials
+             (wp_user_id, credential_hash, status, source)
+         VALUES (?, ?, 'active', 'kiwibnc-oauth')
+         ON DUPLICATE KEY UPDATE
+             credential_hash = VALUES(credential_hash),
+             status = 'active',
+             source = 'kiwibnc-oauth',
+             updated_at = CURRENT_TIMESTAMP`,
+        [wpUserId, credentialHash]
+    );
+}
+
+function buildUserNetwork(defaultNetwork, username, saslSecret) {
     return {
         name: defaultNetwork.name,
         host: defaultNetwork.host,
@@ -234,6 +259,9 @@ function buildUserNetwork(defaultNetwork, username) {
         nick: username,
         username,
         realname: username,
+        password: '',
+        sasl_account: username,
+        sasl_pass: saslSecret,
         channels: defaultNetwork.channels || '',
     };
 }
@@ -246,14 +274,30 @@ function getUserId(user) {
     return user ? user.id : undefined;
 }
 
-async function ensureDefaultNetwork(app, user, defaultNetwork) {
+async function ensureDefaultNetwork(app, user, defaultNetwork, wpUserId) {
     const userId = getUserId(user);
-    const existing = await app.userDb.getNetworkByName(userId, defaultNetwork.name);
-    if (existing) {
-        return;
+    const username = user.username;
+    let network = await app.userDb.getNetworkByName(userId, defaultNetwork.name);
+    if (network) {
+        const existingSaslPass = network.sasl_pass || '';
+        const saslSecret = existingSaslPass && existingSaslPass !== 'RELAYOS_BNC_SASL_UNPROVISIONED'
+            ? existingSaslPass
+            : generateRelayBncSaslSecret();
+
+        network.nick = username;
+        network.username = username;
+        network.realname = username;
+        network.sasl_account = username;
+        network.sasl_pass = saslSecret;
+        await network.save();
+        await ensureRelayBncSaslCredential(app, wpUserId, saslSecret);
+        return network;
     }
 
-    await app.userDb.addNetwork(userId, buildUserNetwork(defaultNetwork, user.username));
+    const saslSecret = generateRelayBncSaslSecret();
+    network = await app.userDb.addNetwork(userId, buildUserNetwork(defaultNetwork, username, saslSecret));
+    await ensureRelayBncSaslCredential(app, wpUserId, saslSecret);
+    return network;
 }
 
 async function ensureOAuthUser(app, identity, defaultNetwork) {
@@ -268,7 +312,7 @@ async function ensureOAuthUser(app, identity, defaultNetwork) {
         user.wp_user_id = identity.wpUserId;
     }
 
-    await ensureDefaultNetwork(app, user, defaultNetwork);
+    await ensureDefaultNetwork(app, user, defaultNetwork, identity.wpUserId);
 
     return user;
 }
@@ -396,6 +440,8 @@ module.exports = {
         resolveWordPressIdentity,
         ensureOAuthUser,
         buildDefaultNetwork,
+        generateRelayBncSaslSecret,
+        ensureRelayBncSaslCredential,
         ensureBncWordPressProvisioning,
         ensureWordPressLinkage,
     },
