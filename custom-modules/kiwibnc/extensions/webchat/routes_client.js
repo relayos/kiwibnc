@@ -1,5 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
+const RelayosEntitlements = require('../../libs/relayos_entitlements');
 
 function isTemplatePlaceholder(value) {
     return typeof value === 'string' && /^\{\{[^}]+\}\}$/.test(value.trim());
@@ -79,11 +80,34 @@ function buildStartupOptions(ctx) {
     };
 }
 
+async function relayosMetadataUsers(app) {
+    const db = app && app.db && app.db.dbUsers;
+    if (!db) {
+        return [];
+    }
+
+    return await db('users')
+        .whereNotNull('wp_user_id')
+        .select('username', 'wp_user_id');
+}
+
 module.exports = function(app, oauthClientConf) {
     let router = app.webserver.router;
 
     let publicPath = app.conf.relativePath(app.conf.get('webserver.public_dir'));
     const oauthEnabled = !!(oauthClientConf && oauthClientConf.login_url);
+    const relayosEntitlements = new RelayosEntitlements({
+        db: app && app.db && app.db.dbUsers,
+        logger: global.l || console,
+    });
+    let relayosEntitlementsReady = null;
+    const ensureRelayosEntitlements = async () => {
+        if (!relayosEntitlementsReady) {
+            relayosEntitlementsReady = relayosEntitlements.init();
+        }
+        await relayosEntitlementsReady;
+        return relayosEntitlements;
+    };
 
     router.get('kiwi.bnc_plugin', '/kiwibnc_plugin.html', async (ctx, next) => {
         ctx.body = await fs.readFile(
@@ -98,6 +122,34 @@ module.exports = function(app, oauthClientConf) {
             path.join(__dirname, 'relayos_badges.js'),
             { encoding: 'utf8' },
         );
+    });
+
+    router.get('kiwi.relayos_metadata', '/relayos_metadata.json', async (ctx, next) => {
+        const resolver = await ensureRelayosEntitlements();
+
+        const users = {};
+        const rows = await relayosMetadataUsers(app);
+        const overlayUsers = Object.keys(resolver.overlayUsers || {}).map((username) => ({ username }));
+        const seen = new Set();
+
+        for (const row of rows.concat(overlayUsers)) {
+            const username = String(row.username || '').trim();
+            const key = username.toLowerCase();
+            if (!username || seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+
+            const metadata = await resolver.projectUserMetadata({
+                username,
+                wp_user_id: row.wp_user_id,
+            });
+            if (Object.keys(metadata).length) {
+                users[username] = metadata;
+            }
+        }
+
+        ctx.body = { users };
     });
 
     router.get('kiwi.config', '/static/config.json', async (ctx, next) => {

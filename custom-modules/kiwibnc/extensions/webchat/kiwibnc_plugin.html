@@ -204,6 +204,172 @@
         });
     }
 
+    const RELAYOS_METADATA_CAP = 'draft/metadata-2';
+    const relayosOverlayMetadata = Object.create(null);
+    const relayosIrcMetadata = Object.create(null);
+    let relayosBadgeRefreshScheduled = false;
+
+    function relayosNormalizeNick(nick) {
+        return String(nick || '').toUpperCase();
+    }
+
+    function relayosCssSelector(value) {
+        return String(value || '')
+            .replace(/\\/g, '\\\\')
+            .replace(/"/g, '\\"')
+            .replace(/[\r\n]/g, '');
+    }
+
+    function relayosCssContent(value) {
+        return relayosCssSelector(value);
+    }
+
+    function relayosEnsureBadgeStyle() {
+        let style = document.querySelector('style[data-relayos-bnc-badges]');
+        if (!style) {
+            style = document.createElement('style');
+            style.setAttribute('data-relayos-bnc-badges', 'true');
+            document.head.appendChild(style);
+        }
+        return style;
+    }
+
+    function relayosMetadataForNick(nick) {
+        const key = relayosNormalizeNick(nick);
+        return Object.assign(
+            {},
+            relayosIrcMetadata[key] || {},
+            relayosOverlayMetadata[key] || {}
+        );
+    }
+
+    function relayosKnownNicks(kiwi) {
+        const nicks = Object.create(null);
+        Object.keys(relayosOverlayMetadata).forEach((key) => {
+            const meta = relayosOverlayMetadata[key];
+            if (meta && meta.__nick) {
+                nicks[meta.__nick] = true;
+            }
+        });
+        Object.keys(relayosIrcMetadata).forEach((key) => {
+            const meta = relayosIrcMetadata[key];
+            if (meta && meta.__nick) {
+                nicks[meta.__nick] = true;
+            }
+        });
+
+        const network = kiwi && kiwi.state && typeof kiwi.state.getActiveNetwork === 'function' ?
+            kiwi.state.getActiveNetwork() :
+            null;
+        if (network && network.users) {
+            Object.keys(network.users).forEach((nickKey) => {
+                const user = network.users[nickKey];
+                if (user && user.nick) {
+                    nicks[user.nick] = true;
+                }
+            });
+        }
+
+        return Object.keys(nicks);
+    }
+
+    function relayosRefreshBadgeStyles(kiwi) {
+        const style = relayosEnsureBadgeStyle();
+        const lines = [];
+
+        relayosKnownNicks(kiwi).forEach((nick) => {
+            const metadata = relayosMetadataForNick(nick);
+            const flag = relayosCountryFlag(metadata['geo/country-code']);
+            const badges = relayosBadgesFromMetadata(
+                Object.assign({}, metadata, { 'geo/country-code': '' })
+            );
+
+            if (flag) {
+                lines.push(`
+                    .kiwi-messagelist-message[data-nick="${relayosCssSelector(nick)}"] .kiwi-messagelist-modern-left::before,
+                    .kiwi-nicklist-user[data-nick="${relayosCssSelector(nick)}"]::before {
+                        content: "${relayosCssContent(flag)}";
+                    }
+                `);
+            }
+
+            if (badges.length) {
+                lines.push(`
+                    .kiwi-messagelist-nick[data-nick="${relayosCssSelector(nick)}"]::after,
+                    .kiwi-nick[data-nick="${relayosCssSelector(nick)}"]::after,
+                    .kiwi-nicklist-user[data-nick="${relayosCssSelector(nick)}"] .kiwi-nicklist-user-nick::after {
+                        content: "${relayosCssContent(badges.join(''))}";
+                    }
+                `);
+            }
+        });
+
+        style.textContent = lines.join('\n');
+    }
+
+    function relayosScheduleBadgeRefresh(kiwi) {
+        if (relayosBadgeRefreshScheduled) {
+            return;
+        }
+        relayosBadgeRefreshScheduled = true;
+        queueMicrotask(() => {
+            relayosBadgeRefreshScheduled = false;
+            relayosRefreshBadgeStyles(kiwi);
+        });
+    }
+
+    function relayosFetchOverlayMetadata(basePath, kiwi) {
+        return fetch(basePath + '/relayos_metadata.json')
+            .then((resp) => resp.json())
+            .then((payload) => {
+                const users = (payload && payload.users) || {};
+                Object.keys(users).forEach((nick) => {
+                    const metadata = Object.assign({}, users[nick] || {});
+                    metadata.__nick = nick;
+                    relayosOverlayMetadata[relayosNormalizeNick(nick)] = metadata;
+                });
+                relayosScheduleBadgeRefresh(kiwi);
+            })
+            .catch(() => {});
+    }
+
+    function relayosSetIrcMetadata(kiwi, target, key, value) {
+        if (!target || key !== 'geo/country-code') {
+            return;
+        }
+
+        const normalized = relayosNormalizeNick(target);
+        if (!relayosIrcMetadata[normalized]) {
+            relayosIrcMetadata[normalized] = { __nick: target };
+        }
+        relayosIrcMetadata[normalized].__nick = target;
+
+        if (value === '' || value === null || typeof value === 'undefined') {
+            delete relayosIrcMetadata[normalized][key];
+        } else {
+            relayosIrcMetadata[normalized][key] = value;
+        }
+
+        relayosScheduleBadgeRefresh(kiwi);
+    }
+
+    function relayosRequestChannelMetadata(kiwi, network, channelName) {
+        if (network && channelName && network.ircClient) {
+            network.ircClient.raw('METADATA', channelName, 'SYNC');
+        }
+    }
+
+    function relayosHandleMetadataEvent(kiwi, event, network, remove) {
+        if (!event || !Array.isArray(event.params)) {
+            return;
+        }
+
+        const target = event.params[1];
+        const key = event.params[2];
+        const value = remove ? '' : (event.params.length > 4 ? event.params[4] : '');
+        relayosSetIrcMetadata(kiwi, target, key, value);
+    }
+
     kiwi.plugin('kiwibnc', function(kiwi, log) {
         const basePath = kiwi.state.settings.plugins.find(p => p.name === 'kiwibnc').basePath;
         const InputText = kiwi.require('components/utils/InputText');
@@ -717,12 +883,64 @@
             }
         });
 
+        kiwi.on('network.connecting', function({ network }) {
+            if (network && network.ircClient && typeof network.ircClient.requestCap === 'function') {
+                network.ircClient.requestCap(RELAYOS_METADATA_CAP);
+            }
+        });
+
+        kiwi.on('irc.registered', function(event, network) {
+            if (network && network.ircClient) {
+                network.ircClient.raw('METADATA', '*', 'SUB', 'geo/country-code');
+            }
+            relayosFetchOverlayMetadata(basePath, kiwi);
+            (network && network.buffers || []).forEach((buffer) => {
+                if (buffer && typeof buffer.isChannel === 'function' && buffer.isChannel()) {
+                    relayosRequestChannelMetadata(kiwi, network, buffer.name);
+                }
+            });
+        });
+
+        kiwi.on('irc.join', function(event, network) {
+            if (event && event.nick && network && event.nick === network.nick && event.channel) {
+                relayosRequestChannelMetadata(kiwi, network, event.channel);
+            }
+            relayosScheduleBadgeRefresh(kiwi);
+        });
+
+        kiwi.on('irc.nick', function() {
+            relayosScheduleBadgeRefresh(kiwi);
+        });
+
+        kiwi.on('irc.quit', function() {
+            relayosScheduleBadgeRefresh(kiwi);
+        });
+
+        kiwi.on('irc.part', function() {
+            relayosScheduleBadgeRefresh(kiwi);
+        });
+
+        kiwi.on('irc.raw.METADATA', function(commandName, event, network) {
+            relayosHandleMetadataEvent(kiwi, event, network, false);
+        });
+
+        kiwi.on('irc.raw.761', function(commandName, event, network) {
+            relayosHandleMetadataEvent(kiwi, event, network, false);
+        });
+
+        kiwi.on('irc.raw.766', function(commandName, event, network) {
+            relayosHandleMetadataEvent(kiwi, event, network, true);
+        });
+
+        relayosFetchOverlayMetadata(basePath, kiwi);
+        relayosRefreshBadgeStyles(kiwi);
         relayosApplyBadges(document);
         if (window.MutationObserver && document.body) {
             const observer = new MutationObserver((mutations) => {
                 mutations.forEach((mutation) => {
                     mutation.addedNodes.forEach((node) => {
                         relayosApplyBadges(node);
+                        relayosScheduleBadgeRefresh(kiwi);
                     });
                 });
             });

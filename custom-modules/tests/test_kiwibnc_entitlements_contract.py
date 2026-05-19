@@ -286,6 +286,10 @@ console.log(JSON.stringify(overlay.users));
 
         self.assertIn("kiwi.relayos_badges", text)
         self.assertIn("relayos_badges.js", text)
+        self.assertIn("kiwi.relayos_metadata", text)
+        self.assertIn("/relayos_metadata.json", text)
+        self.assertIn("RelayosEntitlements", text)
+        self.assertIn("projectUserMetadata", text)
 
     def test_webchat_plugin_loads_and_applies_badges(self):
         text = KIWIBNC_PLUGIN_PATH.read_text()
@@ -317,6 +321,30 @@ console.log(JSON.stringify(overlay.users));
         self.assertNotEqual(apply_index, -1)
         self.assertLess(helper_index, apply_index)
         self.assertIn("data-relayos-badges", main_script)
+
+    def test_webchat_plugin_projects_badges_to_nick_chrome(self):
+        text = KIWIBNC_PLUGIN_PATH.read_text()
+
+        expected_snippets = [
+            "draft/metadata-2",
+            "relayosFetchOverlayMetadata",
+            "relayosRefreshBadgeStyles",
+            "relayosEnsureBadgeStyle",
+            "relayosOverlayMetadata",
+            "relayosIrcMetadata",
+            "network.ircClient.requestCap(RELAYOS_METADATA_CAP)",
+            "network.ircClient.raw('METADATA', '*', 'SUB', 'geo/country-code')",
+            "network.ircClient.raw('METADATA', channelName, 'SYNC')",
+            ".kiwi-messagelist-message[data-nick=\"${relayosCssSelector(nick)}\"] .kiwi-messagelist-modern-left::before",
+            ".kiwi-nicklist-user[data-nick=\"${relayosCssSelector(nick)}\"]::before",
+            ".kiwi-nicklist-user[data-nick=\"${relayosCssSelector(nick)}\"] .kiwi-nicklist-user-nick::after",
+            "content: \"${relayosCssContent(badges.join(''))}\"",
+            "irc.raw.METADATA",
+            "irc.raw.761",
+            "irc.raw.766",
+        ]
+        for snippet in expected_snippets:
+            self.assertIn(snippet, text)
 
 
 if __name__ == "__main__":
