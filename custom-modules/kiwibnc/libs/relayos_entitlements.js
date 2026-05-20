@@ -7,6 +7,7 @@ const DEFAULT_TABLES = Object.freeze({
     entitlements: 'relayos_entitlements',
     entitlementCapabilities: 'relayos_entitlement_capabilities',
     userEntitlements: 'relayos_user_entitlements',
+    platformLinks: 'relayos_platform_links',
     platformEntitlementCache: 'relayos_platform_entitlement_cache',
     wpUsers: 'wp_users',
 });
@@ -56,6 +57,7 @@ class RelayosEntitlements {
         const entitlements = quotedIdentifier(this.tables.entitlements);
         const entitlementCapabilities = quotedIdentifier(this.tables.entitlementCapabilities);
         const userEntitlements = quotedIdentifier(this.tables.userEntitlements);
+        const platformLinks = quotedIdentifier(this.tables.platformLinks);
         const platformEntitlementCache = quotedIdentifier(this.tables.platformEntitlementCache);
         const wpUsers = quotedIdentifier(this.tables.wpUsers);
 
@@ -118,6 +120,26 @@ class RelayosEntitlements {
                     ON DELETE CASCADE,
                 CONSTRAINT fk_relayos_user_entitlements_entitlement
                     FOREIGN KEY (entitlement_key) REFERENCES ${entitlements} (\`key\`)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
+        `);
+
+        await this.db.raw(`
+            CREATE TABLE IF NOT EXISTS ${platformLinks} (
+                \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                \`tenant_id\` VARCHAR(191) NOT NULL,
+                \`wp_user_id\` BIGINT UNSIGNED NOT NULL,
+                \`platform_issuer\` VARCHAR(191) NOT NULL,
+                \`platform_subject_id\` VARCHAR(191) NOT NULL,
+                \`status\` VARCHAR(32) NOT NULL DEFAULT 'active',
+                \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (\`id\`),
+                UNIQUE KEY \`uniq_platform_link\` (\`tenant_id\`, \`wp_user_id\`, \`platform_issuer\`, \`platform_subject_id\`),
+                KEY \`idx_platform_link_user\` (\`tenant_id\`, \`wp_user_id\`),
+                KEY \`idx_platform_link_subject\` (\`platform_issuer\`, \`platform_subject_id\`, \`status\`),
+                CONSTRAINT \`fk_platform_link_wp_user\`
+                    FOREIGN KEY (\`wp_user_id\`) REFERENCES ${wpUsers} (\`ID\`)
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
         `);

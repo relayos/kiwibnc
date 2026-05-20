@@ -16,6 +16,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
     def test_expected_webchat_overlay_files_exist(self):
         for relpath in [
             "kiwibnc/extensions/webchat/routes_oauth.js",
+            "kiwibnc/extensions/webchat/routes_platform_link.js",
             "kiwibnc/extensions/webchat/index.js",
             "kiwibnc/extensions/webchat/routes_client.js",
             "kiwibnc/extensions/webchat/kiwibnc_plugin.html",
@@ -127,6 +128,27 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         self.assertIn("ensureBncWordPressProvisioning", text)
         self.assertIn("require('./provision_bnc')", text)
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*ensureBncWordPressProvisioning")
+
+    def test_platform_link_route_contract_is_tenant_bound(self):
+        text = self.read_overlay("routes_platform_link.js")
+        index = self.read_overlay("index.js")
+
+        for snippet in [
+            "registerPlatformLinkRoutes",
+            "buildPlatformLinkConfig",
+            "syncPlatformEntitlementSnapshot",
+            "relayos_platform_links",
+            "platform_subject_id",
+            "tenant WordPress",
+            "RELAYOS_TENANT_ID",
+            "RELAYOS_PLATFORM_ISSUER",
+            "RELAYOS_PLATFORM_ENTITLEMENT_SNAPSHOT_URL",
+            "No tenant user session",
+        ]:
+            self.assertIn(snippet, text)
+
+        self.assertIn("require('./routes_platform_link')", index)
+        self.assertIn("registerPlatformLinkRoutes(app)", index)
 
     def test_routes_client_disables_public_registration_when_oauth_is_enabled(self):
         text = self.read_overlay("routes_client.js")

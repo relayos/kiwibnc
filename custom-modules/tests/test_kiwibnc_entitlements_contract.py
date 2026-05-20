@@ -166,6 +166,38 @@ db.raw = async (sql) => {
         for snippet in expected_snippets:
             self.assertIn(snippet, text)
 
+    def test_schema_defines_platform_account_link_table(self):
+        script = r"""
+const RelayosEntitlements = require('./kiwibnc/libs/relayos_entitlements');
+const statements = [];
+function db() {}
+db.raw = async (sql) => {
+    statements.push(String(sql).replace(/\s+/g, ' ').trim());
+};
+(async () => {
+    const resolver = new RelayosEntitlements({ db, overlayPath: '' });
+    await resolver.migrateSchema();
+    console.log(JSON.stringify(statements));
+})().catch((err) => {
+    console.error(err.stack || err.message);
+    process.exit(1);
+});
+"""
+        text = " ".join(json.loads(self.run_node(script)))
+
+        expected_snippets = [
+            "CREATE TABLE IF NOT EXISTS `relayos_platform_links`",
+            "`tenant_id` VARCHAR(191) NOT NULL",
+            "`wp_user_id` BIGINT UNSIGNED NOT NULL",
+            "`platform_issuer` VARCHAR(191) NOT NULL",
+            "`platform_subject_id` VARCHAR(191) NOT NULL",
+            "`status` VARCHAR(32) NOT NULL DEFAULT 'active'",
+            "UNIQUE KEY `uniq_platform_link` (`tenant_id`, `wp_user_id`, `platform_issuer`, `platform_subject_id`)",
+            "CONSTRAINT `fk_platform_link_wp_user` FOREIGN KEY (`wp_user_id`) REFERENCES `wp_users` (`ID`) ON DELETE CASCADE",
+        ]
+        for snippet in expected_snippets:
+            self.assertIn(snippet, text)
+
     def test_schema_migrates_legacy_source_blind_unique_key(self):
         script = r"""
 const RelayosEntitlements = require('./kiwibnc/libs/relayos_entitlements');
