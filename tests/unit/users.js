@@ -69,6 +69,30 @@ describe('worker users', () => {
         expect(saved[0].username).toBe('testuser');
         expect(saved[0].admin).toBeUndefined();
     });
+
+    test('authUserToken awaits token lookup before updating access metadata', async () => {
+        const row = { id: 42, username: 'testuser' };
+        const query = {
+            innerJoin: jest.fn(function innerJoin() { return this; }),
+            where: jest.fn(function where() { return this; }),
+            first: jest.fn(() => Promise.resolve(row)),
+        };
+        const db = {
+            dbUsers: jest.fn(() => query),
+            factories: {
+                User: {
+                    fromDbResult: jest.fn((result) => result && ({ id: result.id, username: result.username })),
+                },
+            },
+        };
+        const users = new Users(db);
+        users.updateUserTokenAccess = jest.fn(() => Promise.resolve(1));
+
+        const user = await users.authUserToken('__t1token', '127.0.0.1');
+
+        expect(user).toEqual({ id: 42, username: 'testuser' });
+        expect(users.updateUserTokenAccess).toHaveBeenCalledWith(42, '__t1token', '127.0.0.1');
+    });
 });
 
 describe('database savable models', () => {
