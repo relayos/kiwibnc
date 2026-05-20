@@ -3,6 +3,7 @@ const createLogger = require('../../libs/logger');
 const l = createLogger('webchat-platform-link');
 const PLATFORM_LINKS_TABLE = 'relayos_platform_links';
 const PLATFORM_SUBJECT_COLUMN = 'platform_subject_id';
+const PLATFORM_CACHE_TABLE = 'relayos_platform_entitlement_cache';
 
 function confValue(app, envKey, webKey, def = '') {
     const webchat = app && app.conf && typeof app.conf.get === 'function'
@@ -17,11 +18,12 @@ function buildPlatformLinkConfig(app) {
     const clientId = confValue(app, 'RELAYOS_PLATFORM_OAUTH_CLIENT_ID', 'platform_oauth_client_id');
     const clientSecret = confValue(app, 'RELAYOS_PLATFORM_OAUTH_CLIENT_SECRET', 'platform_oauth_client_secret');
     const redirectUri = confValue(app, 'RELAYOS_PLATFORM_OAUTH_REDIRECT_URI', 'platform_oauth_redirect_uri');
+    const userinfoUrl = confValue(app, 'RELAYOS_PLATFORM_OAUTH_USERINFO_URL', 'platform_oauth_userinfo_url');
     const snapshotUrl = confValue(app, 'RELAYOS_PLATFORM_ENTITLEMENT_SNAPSHOT_URL', 'platform_entitlement_snapshot_url');
     const platformIssuer = confValue(app, 'RELAYOS_PLATFORM_ISSUER', 'platform_issuer', 'platform:relayos-platform');
     const tenantId = confValue(app, 'RELAYOS_TENANT_ID', 'tenant_id', 'relayos-tenant');
 
-    if (!authUrl || !tokenUrl || !clientId || !clientSecret || !redirectUri || !snapshotUrl) {
+    if (!authUrl || !tokenUrl || !clientId || !clientSecret || !redirectUri || !userinfoUrl || !snapshotUrl) {
         return null;
     }
 
@@ -31,14 +33,18 @@ function buildPlatformLinkConfig(app) {
         clientId,
         clientSecret,
         redirectUri,
+        userinfoUrl,
         snapshotUrl,
         platformIssuer,
         tenantId,
         linksTable: PLATFORM_LINKS_TABLE,
+        cacheTable: PLATFORM_CACHE_TABLE,
         subjectColumn: PLATFORM_SUBJECT_COLUMN,
     };
 }
 
+// Platform links are tenant WordPress state: they bind a tenant-local wp_users.ID
+// to a platform subject and never provision or mutate platform WordPress users.
 function tenantUserFromSession(ctx) {
     const state = ctx && ctx.state ? ctx.state : {};
     const user = state.user || state.authUser || null;
@@ -54,16 +60,125 @@ function tenantUserFromSession(ctx) {
     };
 }
 
-async function syncPlatformEntitlementSnapshot(config, tenantUser, platformSubjectId) {
-    // Link-time sync is intentionally separate from tenant WordPress OAuth.
-    // Platform webhooks keep this cache current after the initial snapshot.
-    l.info('Platform entitlement snapshot sync queued', {
-        tenantId: config.tenantId,
-        platformIssuer: config.platformIssuer,
-        wpUserId: tenantUser.wpUserId,
-        platformSubjectId,
+async function requestJson(url, options) {
+    if (typeof fetch !== 'function') {
+        throw new Error('Platform account linking requires global fetch support');
+    }
+
+    const response = await fetch(url, options);
+    const body = await response.text();
+    let parsed = {};
+    if (body) {
+        parsed = JSON.parse(body);
+    }
+    if (!response.ok) {
+        const err = new Error(`Platform request failed with HTTP ${response.status}`);
+        err.status = response.status;
+        err.body = parsed;
+        throw err;
+    }
+    return parsed;
+}
+
+async function exchangePlatformOauthCode(config, code, httpPost) {
+    const post = httpPost || ((url, options) => requestJson(url, { method: 'POST', ...options }));
+    const grantType = 'grant_type=authorization_code';
+    const body = [
+        grantType,
+        `code=${encodeURIComponent(code)}`,
+        `client_id=${encodeURIComponent(config.clientId)}`,
+        `client_secret=${encodeURIComponent(config.clientSecret)}`,
+        `redirect_uri=${encodeURIComponent(config.redirectUri)}`,
+    ].join('&');
+    const token = await post(config.tokenUrl, {
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body,
     });
-    return { synced: false };
+    const accessToken = token.access_token || token.accessToken;
+    if (!accessToken) {
+        throw new Error('Platform OAuth token response missing access_token');
+    }
+
+    const userinfo = await requestJson(config.userinfoUrl, {
+        headers: { authorization: `Bearer ${accessToken}` },
+    });
+    const platformUserId = userinfo.platform_user_id || userinfo.wp_user_id || userinfo.id || userinfo.sub;
+    const platformSubjectId = userinfo.platform_subject_id || `wp:${platformUserId}`;
+    if (!platformUserId || !platformSubjectId) {
+        throw new Error('Platform OAuth userinfo missing platform_user_id or platform_subject_id');
+    }
+
+    return {
+        access_token: accessToken,
+        platform_user_id: platformUserId,
+        platform_subject_id: platformSubjectId,
+        userinfo,
+    };
+}
+
+async function fetchPlatformEntitlementSnapshot(config, platformUserId, httpGet) {
+    const get = httpGet || ((url, options) => requestJson(url, { method: 'GET', ...options }));
+    const url = new URL(config.snapshotUrl);
+    url.searchParams.set('wp_user_id', String(platformUserId));
+    return get(url.toString(), {});
+}
+
+async function upsertPlatformAccountLink(config, tenantUser, platformSubjectId, db) {
+    await db.raw(
+        [
+            'INSERT INTO `relayos_platform_links`',
+            '  (tenant_id, wp_user_id, platform_issuer, platform_subject_id, status, linked_at, updated_at)',
+            "VALUES (?, ?, ?, ?, 'active', NOW(), NOW())",
+            "ON DUPLICATE KEY UPDATE status = 'active', updated_at = NOW()",
+        ].join('\n'),
+        [config.tenantId, tenantUser.wpUserId, config.platformIssuer, platformSubjectId]
+    );
+}
+
+async function cachePlatformEntitlementSnapshot(config, tenantUser, platformSubjectId, snapshot, db) {
+    const platformIssuer = snapshot.platform_issuer || config.platformIssuer;
+    const snapshotSubjectId = snapshot.platform_subject_id || platformSubjectId;
+    const entitlements = Array.isArray(snapshot.entitlements) ? snapshot.entitlements : [];
+    await db.raw(
+        [
+            'DELETE FROM `relayos_platform_entitlement_cache`',
+            'WHERE tenant_id = ?',
+            '  AND wp_user_id = ?',
+            '  AND platform_issuer = ?',
+            '  AND platform_subject_id = ?',
+        ].join('\n'),
+        [config.tenantId, tenantUser.wpUserId, platformIssuer, snapshotSubjectId]
+    );
+
+    for (const entitlement of entitlements) {
+        const entitlementKey = entitlement.entitlement_key || entitlement.key;
+        if (!entitlementKey) {
+            continue;
+        }
+        await db.raw(
+            [
+                'INSERT INTO `relayos_platform_entitlement_cache`',
+                '  (tenant_id, wp_user_id, platform_issuer, platform_subject_id, entitlement_key, status, synced_at)',
+                'VALUES (?, ?, ?, ?, ?, ?, NOW())',
+                'ON DUPLICATE KEY UPDATE status = VALUES(status), synced_at = NOW()',
+            ].join('\n'),
+            [
+                config.tenantId,
+                tenantUser.wpUserId,
+                platformIssuer,
+                snapshotSubjectId,
+                entitlementKey,
+                entitlement.status || 'active',
+            ]
+        );
+    }
+
+    return { synced: true, entitlements: entitlements.length };
+}
+
+async function syncPlatformEntitlementSnapshot(config, tenantUser, platformSubjectId, platformUserId, db, httpGet) {
+    const snapshot = await fetchPlatformEntitlementSnapshot(config, platformUserId, httpGet);
+    return cachePlatformEntitlementSnapshot(config, tenantUser, platformSubjectId, snapshot, db);
 }
 
 function registerPlatformLinkRoutes(app) {
@@ -74,6 +189,7 @@ function registerPlatformLinkRoutes(app) {
     }
 
     const router = app.webserver.router;
+    const db = app.db && app.db.dbUsers;
 
     router.get('/platform/link', async (ctx) => {
         const tenantUser = tenantUserFromSession(ctx);
@@ -83,11 +199,47 @@ function registerPlatformLinkRoutes(app) {
             return;
         }
 
+        const url = new URL(config.authUrl);
+        url.searchParams.set('response_type', 'code');
+        url.searchParams.set('client_id', config.clientId);
+        url.searchParams.set('redirect_uri', config.redirectUri);
+        ctx.redirect(url.toString());
+    });
+
+    router.get('/platform/callback', async (ctx) => {
+        const tenantUser = tenantUserFromSession(ctx);
+        if (!tenantUser) {
+            ctx.status = 401;
+            ctx.body = { error: 'No tenant user session' };
+            return;
+        }
+        if (!ctx.query.code) {
+            ctx.status = 400;
+            ctx.body = { error: 'Missing platform OAuth code' };
+            return;
+        }
+        if (!db) {
+            ctx.status = 503;
+            ctx.body = { error: 'Tenant database unavailable' };
+            return;
+        }
+
+        const platformIdentity = await exchangePlatformOauthCode(config, ctx.query.code);
+        await upsertPlatformAccountLink(config, tenantUser, platformIdentity.platform_subject_id, db);
+        const sync = await syncPlatformEntitlementSnapshot(
+            config,
+            tenantUser,
+            platformIdentity.platform_subject_id,
+            platformIdentity.platform_user_id,
+            db
+        );
         ctx.body = {
-            error: 'not_implemented',
-            message: 'Platform account linking is configured but OAuth redirect handling is not enabled in this slice.',
+            message: 'Platform account linked',
             tenant_id: config.tenantId,
-            issuer: config.platformIssuer,
+            platform_issuer: config.platformIssuer,
+            platform_subject_id: platformIdentity.platform_subject_id,
+            platform_user_id: platformIdentity.platform_user_id,
+            synced_entitlements: sync.entitlements,
         };
     });
 
@@ -97,8 +249,13 @@ function registerPlatformLinkRoutes(app) {
 module.exports = {
     registerPlatformLinkRoutes,
     buildPlatformLinkConfig,
+    exchangePlatformOauthCode,
+    fetchPlatformEntitlementSnapshot,
+    upsertPlatformAccountLink,
+    cachePlatformEntitlementSnapshot,
     syncPlatformEntitlementSnapshot,
     __testHooks: {
         tenantUserFromSession,
+        requestJson,
     },
 };

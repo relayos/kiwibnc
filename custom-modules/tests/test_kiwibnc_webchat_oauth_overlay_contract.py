@@ -150,6 +150,35 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         self.assertIn("require('./routes_platform_link')", index)
         self.assertIn("registerPlatformLinkRoutes(app)", index)
 
+    def test_platform_link_syncs_snapshot_into_tenant_cache(self):
+        text = self.read_overlay("routes_platform_link.js")
+
+        for snippet in [
+            "exchangePlatformOauthCode",
+            "fetchPlatformEntitlementSnapshot",
+            "upsertPlatformAccountLink",
+            "cachePlatformEntitlementSnapshot",
+            "POST",
+            "grant_type=authorization_code",
+            "INSERT INTO `relayos_platform_links`",
+            "INSERT INTO `relayos_platform_entitlement_cache`",
+            "ON DUPLICATE KEY UPDATE",
+            "DELETE FROM `relayos_platform_entitlement_cache`",
+        ]:
+            self.assertIn(snippet, text)
+
+    def test_platform_link_callback_route_completes_link_time_sync(self):
+        text = self.read_overlay("routes_platform_link.js")
+
+        for snippet in [
+            "router.get('/platform/callback'",
+            "ctx.query.code",
+            "platform_user_id",
+            "platform_subject_id",
+            "Platform account linked",
+        ]:
+            self.assertIn(snippet, text)
+
     def test_routes_client_disables_public_registration_when_oauth_is_enabled(self):
         text = self.read_overlay("routes_client.js")
 
