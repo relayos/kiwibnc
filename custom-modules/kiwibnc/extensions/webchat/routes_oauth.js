@@ -7,6 +7,7 @@ const createLogger = require('../../libs/logger');
 const Helpers = require('../../libs/helpers');
 const { ensureBncWordPressProvisioning } = require('./provision_bnc');
 const l = createLogger('webchat-oauth');
+const DEFAULT_TENANT_ID = process.env.RELAYOS_TENANT_ID || 'relayos-tenant';
 
 function parseBool(value, def) {
     if (typeof value === 'undefined' || value === null || value === '') {
@@ -49,6 +50,7 @@ function buildOauthConfig(app) {
     const redirectUri = conf('KIWIBNC_OAUTH_REDIRECT_URI', 'oauth_redirect_uri');
     const userInfoUrl = conf('KIWIBNC_OAUTH_USERINFO_URL', 'oauth_userinfo_url');
     const scope = conf('KIWIBNC_OAUTH_SCOPE', 'oauth_scope', 'openid profile email');
+    const tenantId = conf('RELAYOS_TENANT_ID', 'tenant_id', DEFAULT_TENANT_ID);
 
     l.info('OAuth config values', {
         clientId: !!clientId,
@@ -75,6 +77,7 @@ function buildOauthConfig(app) {
         provider: 'RelayOS',
         allowRegistration: false,
         defaultNetwork: buildDefaultNetwork(webchat),
+        tenantId,
     };
 }
 
@@ -199,6 +202,8 @@ function respondError(ctx, message) {
 }
 
 function resolveWordPressIdentity(userInfo) {
+    // This OAuth route maps tenant WordPress users to tenant-local BNC users.
+    // Platform OAuth account linking is a separate flow and must not provision BNC users.
     const username = userInfo && typeof userInfo.user_login === 'string'
         ? userInfo.user_login.trim()
         : '';

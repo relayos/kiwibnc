@@ -36,6 +36,8 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "wp_user_id",
             "identity.wpUserId",
             "setUserWordPressId",
+            "tenant WordPress",
+            "RELAYOS_TENANT_ID",
         ]
         for snippet in expected_snippets:
             self.assertIn(snippet, text)
@@ -44,6 +46,9 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         text = self.read_overlay("provision_bnc.js")
 
         for snippet in [
+            "tenant WordPress",
+            "RELAYOS_TENANT_ID",
+            "relayos-tenant",
             "async function ensureBncWordPressProvisioning",
             "module.exports",
             "wp_users",
@@ -56,6 +61,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "bcrypt_hash(CONCAT('oauth-unusable-'",
         ]:
             self.assertIn(snippet, text)
+        self.assertNotIn("platform_subject_id", text)
 
     def test_bnc_provisioning_installs_relaybnc_sasl_credential_table(self):
         text = self.read_overlay("provision_bnc.js")

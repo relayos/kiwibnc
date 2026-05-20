@@ -2,6 +2,7 @@ const createLogger = require('../../libs/logger');
 
 const l = createLogger('webchat-bnc-provisioning');
 const WORDPRESS_USERS_REFERENCE_SQL = 'REFERENCES `wp_users` (`ID`)';
+const DEFAULT_TENANT_ID = process.env.RELAYOS_TENANT_ID || 'relayos-tenant';
 
 function quotedIdentifier(knex, name) {
     return knex.client.wrapIdentifier(name, (value) => `\`${value.replace(/`/g, '``')}\``);
@@ -198,6 +199,9 @@ CREATE TABLE IF NOT EXISTS ${quotedIdentifier(knex, 'relayos_bnc_sasl_credential
 }
 
 async function ensureBncWordPressProvisioning(app, defaultNetwork) {
+    // BNC provisioning is intentionally scoped to tenant WordPress users.
+    // Platform account links project entitlements later; they must not create BNC users.
+    const tenantId = process.env.RELAYOS_TENANT_ID || DEFAULT_TENANT_ID;
     const knex = app.db && app.db.dbUsers;
     const clientName = knex && knex.client && knex.client.config && knex.client.config.client;
     if (!knex || !knex.schema || !['mysql', 'mysql2'].includes(clientName)) {
@@ -223,7 +227,7 @@ async function ensureBncWordPressProvisioning(app, defaultNetwork) {
     await backfillWordPressUsers(knex, defaultNetwork);
     await installTriggers(knex, quotedIdentifier(knex, 'users'), quotedIdentifier(knex, 'user_networks'), defaultNetwork);
 
-    l.info('BNC WordPress provisioning ensured');
+    l.info('BNC tenant WordPress provisioning ensured', { tenantId });
 }
 
 module.exports = {
