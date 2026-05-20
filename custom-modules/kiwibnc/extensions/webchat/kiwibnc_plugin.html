@@ -41,6 +41,16 @@
                         Login with {{ oauthProvider }}
                     </button>
                 </div>
+                <div v-if="platformLinkEnabled" class="kiwibnc-oauth">
+                    <button
+                        type="button"
+                        class="u-button u-button-secondary"
+                        :disabled="loading"
+                        @click="startPlatformLink"
+                    >
+                        Connect platform subscription
+                    </button>
+                </div>
                 <div v-if="publicRegistrationEnabled" @click="showLogin=!showLogin">
                     <span v-if="showLogin">
                         <a class="u-link">Create an account</a>
@@ -403,6 +413,14 @@
                 oauthEnabled() {
                     return !!(this.oauthConfig && this.oauthConfig.login_url);
                 },
+                platformLinkConfig() {
+                    return this.$state.settings.platform_link || null;
+                },
+                platformLinkEnabled() {
+                    const { token } = this.getLogin();
+                    const oauthLogin = this.getOauthLogin();
+                    return !!(this.platformLinkConfig && this.platformLinkConfig.link_url && (token || (oauthLogin && oauthLogin.token)));
+                },
                 publicRegistrationEnabled() {
                     return !!this.$state.settings.startupOptions.public_register;
                 },
@@ -679,6 +697,23 @@
                     if (this.oauthEnabled) {
                         window.location.href = this.oauthConfig.login_url;
                     }
+                },
+                startPlatformLink() {
+                    if (!this.platformLinkEnabled) {
+                        return;
+                    }
+                    const { token: rememberedToken } = this.getLogin();
+                    const oauthLogin = this.getOauthLogin();
+                    const token = rememberedToken || (oauthLogin && oauthLogin.token);
+                    fetch(this.platformLinkConfig.link_url, {
+                        headers: new Headers({ Authorization: `Bearer ${token}` }),
+                    })
+                    .then((resp) => resp.json())
+                    .then((payload) => {
+                        if (payload && payload.url) {
+                            window.location.href = payload.url;
+                        }
+                    });
                 },
                 getOauthLogin() {
                     try {

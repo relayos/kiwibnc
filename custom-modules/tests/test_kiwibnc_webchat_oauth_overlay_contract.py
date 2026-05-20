@@ -135,6 +135,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
 
         for snippet in [
             "registerPlatformLinkRoutes",
+            "getPlatformLinkClientConfig",
             "buildPlatformLinkConfig",
             "syncPlatformEntitlementSnapshot",
             "relayos_platform_links",
@@ -143,12 +144,18 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "RELAYOS_TENANT_ID",
             "RELAYOS_PLATFORM_ISSUER",
             "RELAYOS_PLATFORM_ENTITLEMENT_SNAPSHOT_URL",
-            "No tenant user session",
+            "Authorization",
+            "Bearer",
+            "authUserToken",
+            "setPlatformLinkStateCookie",
+            "readPlatformLinkStateCookie",
+            "Platform account link requires BNC login",
         ]:
             self.assertIn(snippet, text)
 
         self.assertIn("require('./routes_platform_link')", index)
-        self.assertIn("registerPlatformLinkRoutes(app)", index)
+        self.assertIn("const platformLinkConf = registerPlatformLinkRoutes(app)", index)
+        self.assertIn("getPlatformLinkClientConfig(platformLinkConf)", index)
 
     def test_platform_link_syncs_snapshot_into_tenant_cache(self):
         text = self.read_overlay("routes_platform_link.js")
@@ -172,6 +179,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
 
         for snippet in [
             "router.get('/platform/callback'",
+            "ctx.query.state",
             "ctx.query.code",
             "platform_user_id",
             "platform_subject_id",
@@ -188,6 +196,16 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         self.assertIn("if (oauthEnabled || !app.conf.get('webchat.public_register', false))", text)
         self.assertIn("config.oauth = oauthClientConf", text)
 
+    def test_routes_client_exposes_platform_link_client_config(self):
+        text = self.read_overlay("routes_client.js")
+
+        for snippet in [
+            "platformLinkClientConf",
+            "config.platform_link = platformLinkClientConf",
+            "platform_link",
+        ]:
+            self.assertIn(snippet, text)
+
     def test_plugin_html_contains_oauth_login_ux_and_localstorage_handoff(self):
         text = self.read_overlay("kiwibnc_plugin.html")
 
@@ -198,6 +216,12 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "getOauthLogin()",
             "window.localStorage.getItem('kiwibnc_oauth_login')",
             "window.localStorage.removeItem('kiwibnc_oauth_login')",
+            "platformLinkEnabled",
+            "Connect platform subscription",
+            "startPlatformLink",
+            "Authorization",
+            "Bearer ${token}",
+            "this.$state.settings.platform_link",
         ]
         for snippet in expected_snippets:
             self.assertIn(snippet, text)

@@ -91,7 +91,7 @@ async function relayosMetadataUsers(app) {
         .select('username', 'wp_user_id');
 }
 
-module.exports = function(app, oauthClientConf) {
+module.exports = function(app, oauthClientConf, platformLinkClientConf) {
     let router = app.webserver.router;
 
     let publicPath = app.conf.relativePath(app.conf.get('webserver.public_dir'));
@@ -190,6 +190,9 @@ module.exports = function(app, oauthClientConf) {
         if (oauthClientConf) {
             config.oauth = oauthClientConf;
         }
+        if (platformLinkClientConf) {
+            config.platform_link = platformLinkClientConf;
+        }
 
         let extraConf = app.conf.get('webchat');
         for (let prop in extraConf) {
@@ -202,6 +205,9 @@ module.exports = function(app, oauthClientConf) {
             app.conf.get('webchat.public_register', false);
         if (oauthEnabled) {
             config.oauth = oauthClientConf;
+        }
+        if (platformLinkClientConf) {
+            config.platform_link = platformLinkClientConf;
         }
 
         ctx.body = config;

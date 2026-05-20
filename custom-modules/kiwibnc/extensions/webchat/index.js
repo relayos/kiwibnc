@@ -5,7 +5,10 @@ const path = require('path');
 const unzipper = require('unzipper');
 const routesAdmin = require('./routes_admin');
 const routesClient = require('./routes_client');
-const { registerPlatformLinkRoutes } = require('./routes_platform_link');
+const {
+    registerPlatformLinkRoutes,
+    getPlatformLinkClientConfig,
+} = require('./routes_platform_link');
 const {
     registerRoutes: registerOauthRoutes,
     getClientConfig: getOauthClientConfig,
@@ -27,8 +30,8 @@ module.exports.init = async function init(hooks, app) {
     const oauthClientConf = getOauthClientConfig(oauthConf);
 
     routesAdmin(app);
-    registerPlatformLinkRoutes(app);
-    routesClient(app, oauthClientConf);
+    const platformLinkConf = registerPlatformLinkRoutes(app);
+    routesClient(app, oauthClientConf, getPlatformLinkClientConfig(platformLinkConf));
 
     // Add an admin auth token to admin clients
     hooks.on('available_isupports', async event => {

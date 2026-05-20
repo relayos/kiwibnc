@@ -1,9 +1,11 @@
 const createLogger = require('../../libs/logger');
+const crypto = require('crypto');
 
 const l = createLogger('webchat-platform-link');
 const PLATFORM_LINKS_TABLE = 'relayos_platform_links';
 const PLATFORM_SUBJECT_COLUMN = 'platform_subject_id';
 const PLATFORM_CACHE_TABLE = 'relayos_platform_entitlement_cache';
+const PLATFORM_LINK_STATE_COOKIE = 'relaybnc_platform_link_state';
 
 function confValue(app, envKey, webKey, def = '') {
     const webchat = app && app.conf && typeof app.conf.get === 'function'
@@ -45,10 +47,10 @@ function buildPlatformLinkConfig(app) {
 
 // Platform links are tenant WordPress state: they bind a tenant-local wp_users.ID
 // to a platform subject and never provision or mutate platform WordPress users.
-function tenantUserFromSession(ctx) {
+function tenantUserFromSession(ctx, user) {
     const state = ctx && ctx.state ? ctx.state : {};
-    const user = state.user || state.authUser || null;
-    const wpUserId = user && (user.wp_user_id || user.wpUserId);
+    const authUser = user || state.user || state.authUser || null;
+    const wpUserId = authUser && (authUser.wp_user_id || authUser.wpUserId);
 
     if (!wpUserId) {
         return null;
@@ -56,8 +58,77 @@ function tenantUserFromSession(ctx) {
 
     return {
         wpUserId,
-        username: user.username || user.user_login || '',
+        userId: authUser.id,
+        username: authUser.username || authUser.user_login || '',
     };
+}
+
+function bearerToken(ctx) {
+    // Authorization: Bearer <token>
+    const authorization = (ctx.headers && ctx.headers.authorization) || '';
+    const parts = authorization.split(/\s+/);
+    if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+        return parts[1];
+    }
+    return '';
+}
+
+async function tenantUserFromBearerToken(ctx, app) {
+    const token = bearerToken(ctx);
+    if (!token || !app.userDb || typeof app.userDb.authUserToken !== 'function') {
+        return null;
+    }
+
+    const user = await app.userDb.authUserToken(token, ctx.ip);
+    return tenantUserFromSession(ctx, user);
+}
+
+function setPlatformLinkStateCookie(ctx, app, tenantUser, state) {
+    const payload = JSON.stringify({
+        state,
+        userId: tenantUser.userId,
+        wpUserId: tenantUser.wpUserId,
+        username: tenantUser.username,
+        expires: Date.now() + (5 * 60 * 1000),
+    });
+    ctx.cookies.set(PLATFORM_LINK_STATE_COOKIE, app.crypt.encrypt(payload), {
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: 5 * 60 * 1000,
+    });
+}
+
+function clearPlatformLinkStateCookie(ctx) {
+    ctx.cookies.set(PLATFORM_LINK_STATE_COOKIE, null, { maxAge: 0 });
+}
+
+function readPlatformLinkStateCookie(ctx, app) {
+    const raw = ctx.cookies.get(PLATFORM_LINK_STATE_COOKIE) || '';
+    const decrypted = raw && app.crypt ? app.crypt.decrypt(raw) : '';
+    if (!decrypted) {
+        return null;
+    }
+    try {
+        const payload = JSON.parse(decrypted);
+        if (!payload.state || payload.state !== ctx.query.state || Date.now() > Number(payload.expires || 0)) {
+            return null;
+        }
+        if (!payload.wpUserId) {
+            return null;
+        }
+        return {
+            userId: payload.userId,
+            wpUserId: payload.wpUserId,
+            username: payload.username || '',
+        };
+    } catch (err) {
+        return null;
+    }
+}
+
+function respondAuthRequired(ctx) {
+    ctx.status = 401;
+    ctx.body = { error: 'Platform account link requires BNC login' };
 }
 
 async function requestJson(url, options) {
@@ -192,25 +263,27 @@ function registerPlatformLinkRoutes(app) {
     const db = app.db && app.db.dbUsers;
 
     router.get('/platform/link', async (ctx) => {
-        const tenantUser = tenantUserFromSession(ctx);
+        const tenantUser = await tenantUserFromBearerToken(ctx, app);
         if (!tenantUser) {
-            ctx.status = 401;
-            ctx.body = { error: 'No tenant user session' };
+            respondAuthRequired(ctx);
             return;
         }
+
+        const state = crypto.randomBytes(16).toString('hex');
+        setPlatformLinkStateCookie(ctx, app, tenantUser, state);
 
         const url = new URL(config.authUrl);
         url.searchParams.set('response_type', 'code');
         url.searchParams.set('client_id', config.clientId);
         url.searchParams.set('redirect_uri', config.redirectUri);
-        ctx.redirect(url.toString());
+        url.searchParams.set('state', state);
+        ctx.body = { url: url.toString() };
     });
 
     router.get('/platform/callback', async (ctx) => {
-        const tenantUser = tenantUserFromSession(ctx);
+        const tenantUser = readPlatformLinkStateCookie(ctx, app);
         if (!tenantUser) {
-            ctx.status = 401;
-            ctx.body = { error: 'No tenant user session' };
+            respondAuthRequired(ctx);
             return;
         }
         if (!ctx.query.code) {
@@ -223,6 +296,7 @@ function registerPlatformLinkRoutes(app) {
             ctx.body = { error: 'Tenant database unavailable' };
             return;
         }
+        clearPlatformLinkStateCookie(ctx);
 
         const platformIdentity = await exchangePlatformOauthCode(config, ctx.query.code);
         await upsertPlatformAccountLink(config, tenantUser, platformIdentity.platform_subject_id, db);
@@ -246,8 +320,19 @@ function registerPlatformLinkRoutes(app) {
     return config;
 }
 
+function getPlatformLinkClientConfig(config) {
+    if (!config) {
+        return null;
+    }
+
+    return {
+        link_url: '/platform/link',
+    };
+}
+
 module.exports = {
     registerPlatformLinkRoutes,
+    getPlatformLinkClientConfig,
     buildPlatformLinkConfig,
     exchangePlatformOauthCode,
     fetchPlatformEntitlementSnapshot,
@@ -256,6 +341,9 @@ module.exports = {
     syncPlatformEntitlementSnapshot,
     __testHooks: {
         tenantUserFromSession,
+        tenantUserFromBearerToken,
+        setPlatformLinkStateCookie,
+        readPlatformLinkStateCookie,
         requestJson,
     },
 };
