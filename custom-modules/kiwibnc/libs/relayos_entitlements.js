@@ -13,11 +13,20 @@ const DEFAULT_TABLES = Object.freeze({
 });
 
 const DEFAULT_ENTITLEMENTS = Object.freeze({
+    'relaybnc-active-subscriber': Object.freeze([
+        'async_message.send.same_tenant',
+        'async_message.receive.same_tenant',
+        'async_message.send_to_offline',
+        'async_message.receive_from_anyone',
+    ]),
     'active-subscriber': Object.freeze([
+        'async_message.send.same_tenant',
+        'async_message.receive.same_tenant',
         'async_message.send_to_offline',
         'async_message.receive_from_anyone',
     ]),
     'early-supporter': Object.freeze([
+        'async_message.receive.same_tenant',
         'async_message.receive_from_anyone',
     ]),
     lucky: Object.freeze([]),
@@ -356,8 +365,35 @@ class RelayosEntitlements {
         return sorted(Array.from(granted));
     }
 
+    async getPlatformCachedEntitlements(user) {
+        user = user || {};
+        if (!this.db || user.wp_user_id === undefined || user.wp_user_id === null) {
+            return [];
+        }
+
+        const rows = rowsFromRaw(await this.db.raw(
+            `SELECT entitlement_key AS \`key\`
+             FROM ${quotedIdentifier(this.tables.platformEntitlementCache)}
+             WHERE wp_user_id = ?
+               AND tenant_id = ?
+               AND status = 'active'
+               AND (starts_at IS NULL OR starts_at <= ?)
+               AND (expires_at IS NULL OR expires_at > ?)`,
+            [user.wp_user_id, this.tenantId, new Date(), new Date()]
+        ));
+
+        return sorted(rows.map((row) => row.key || row.entitlement_key));
+    }
+
+    async getEffectiveUserEntitlements(user) {
+        const granted = new Set(await this.getUserEntitlements(user));
+        const platformEntitlements = await this.getPlatformCachedEntitlements(user);
+        platformEntitlements.forEach((key) => granted.add(key));
+        return sorted(Array.from(granted));
+    }
+
     async getUserCapabilities(user) {
-        const entitlements = await this.getUserEntitlements(user);
+        const entitlements = await this.getEffectiveUserEntitlements(user);
         const capabilities = new Set();
 
         if (this.db) {
@@ -389,17 +425,23 @@ class RelayosEntitlements {
 
     async canQueueOfflineDirectMessage(sender, recipient) {
         const senderCapabilities = await this.getUserCapabilities(sender);
-        if (senderCapabilities.includes('async_message.send_to_offline')) {
+        if (
+            senderCapabilities.includes('async_message.send.same_tenant') ||
+            senderCapabilities.includes('async_message.send_to_offline')
+        ) {
             return true;
         }
 
         const recipientCapabilities = await this.getUserCapabilities(recipient);
-        return recipientCapabilities.includes('async_message.receive_from_anyone');
+        return (
+            recipientCapabilities.includes('async_message.receive.same_tenant') ||
+            recipientCapabilities.includes('async_message.receive_from_anyone')
+        );
     }
 
     async projectUserMetadata(user) {
         const metadata = {};
-        const entitlements = await this.getUserEntitlements(user);
+        const entitlements = await this.getEffectiveUserEntitlements(user);
 
         entitlements.forEach((key) => {
             metadata[`entitlement/${key}`] = 'true';

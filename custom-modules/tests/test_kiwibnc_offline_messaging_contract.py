@@ -98,6 +98,7 @@ class KiwiBncOfflineMessagingContractTests(unittest.TestCase):
 
         for snippet in [
             "const recipientCapabilities = await this.getUserCapabilities(recipient)",
+            "recipientCapabilities.includes('async_message.receive.same_tenant')",
             "recipientCapabilities.includes('async_message.receive_from_anyone')",
         ]:
             self.assertIn(snippet, entitlements_text)

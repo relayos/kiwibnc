@@ -64,6 +64,7 @@ class KiwiBncEntitlementsContractTests(unittest.TestCase):
         self.assertRegex(text, r"async\s+init\s*\(")
         self.assertRegex(text, r"async\s+migrateSchema\s*\(")
         self.assertRegex(text, r"async\s+getUserEntitlements\s*\(")
+        self.assertRegex(text, r"async\s+getEffectiveUserEntitlements\s*\(")
         self.assertRegex(text, r"async\s+getUserCapabilities\s*\(")
         self.assertRegex(text, r"async\s+canQueueOfflineDirectMessage\s*\(")
         self.assertRegex(text, r"async\s+projectUserMetadata\s*\(")
@@ -261,6 +262,35 @@ db.raw = async (sql) => {
 
         self.assertEqual(capabilities, ["async_message.receive_from_anyone"])
 
+    def test_effective_entitlements_include_projected_platform_cache(self):
+        script = r"""
+const RelayosEntitlements = require('./kiwibnc/libs/relayos_entitlements');
+function db() {}
+db.raw = async (sql, bindings) => {
+    if (sql.includes('FROM `relayos_user_entitlements`')) {
+        return [[{ key: 'lucky' }]];
+    }
+    if (sql.includes('FROM `relayos_platform_entitlement_cache`')) {
+        if (bindings[0] !== 123 || bindings[1] !== 'relayos-tenant') {
+            throw new Error(`unexpected bindings ${JSON.stringify(bindings)}`);
+        }
+        return [[{ key: 'relaybnc-active-subscriber' }]];
+    }
+    return [[]];
+};
+(async () => {
+    const resolver = new RelayosEntitlements({ db, overlayPath: '', tenantId: 'relayos-tenant' });
+    const entitlements = await resolver.getEffectiveUserEntitlements({ wp_user_id: 123 });
+    console.log(JSON.stringify(entitlements));
+})().catch((err) => {
+    console.error(err.stack || err.message);
+    process.exit(1);
+});
+"""
+        entitlements = json.loads(self.run_node(script))
+
+        self.assertEqual(entitlements, ["lucky", "relaybnc-active-subscriber"])
+
     def test_offline_direct_message_policy_allows_recipient_receive_capability(self):
         script = r"""
 const fs = require('fs');
@@ -310,7 +340,10 @@ const RelayosEntitlements = require('./kiwibnc/libs/relayos_entitlements');
             "RELAYOS_ENTITLEMENTS_OVERLAY",
             "async_message.send_to_offline",
             "async_message.receive_from_anyone",
+            "async_message.send.same_tenant",
+            "async_message.receive.same_tenant",
             "active-subscriber",
+            "relaybnc-active-subscriber",
             "lucky",
             "parseOverlay",
         ]
