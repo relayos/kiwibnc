@@ -109,12 +109,23 @@ db.raw = async (sql) => {
             "FOREIGN KEY (entitlement_key) REFERENCES `relayos_entitlements` (`key`)",
             "source VARCHAR(64) NOT NULL DEFAULT 'system'",
             "source_ref VARCHAR(191) NOT NULL DEFAULT ''",
+            "tenant_id VARCHAR(191) NOT NULL DEFAULT 'relayos-tenant'",
+            "issuer VARCHAR(191) NOT NULL DEFAULT 'tenant:relayos-tenant'",
+            "issuer_subject VARCHAR(191) NOT NULL DEFAULT ''",
             "UNIQUE KEY uniq_relayos_user_entitlement_source (wp_user_id, entitlement_key, source, source_ref)",
+            "UNIQUE KEY uniq_user_entitlement_issuer_source (tenant_id, wp_user_id, entitlement_key, issuer, source, source_ref)",
             "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT 'system'",
             "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS source_ref VARCHAR(191) NOT NULL DEFAULT ''",
+            "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(191) NOT NULL DEFAULT 'relayos-tenant'",
+            "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS issuer VARCHAR(191) NOT NULL DEFAULT 'tenant:relayos-tenant'",
+            "ALTER TABLE `relayos_user_entitlements` ADD COLUMN IF NOT EXISTS issuer_subject VARCHAR(191) NOT NULL DEFAULT ''",
             "UPDATE `relayos_user_entitlements` SET source_ref = '' WHERE source_ref IS NULL",
+            "UPDATE `relayos_user_entitlements` SET tenant_id = ? WHERE tenant_id = '' OR tenant_id IS NULL",
+            "UPDATE `relayos_user_entitlements` SET issuer = ? WHERE issuer = '' OR issuer IS NULL",
+            "UPDATE `relayos_user_entitlements` SET issuer_subject = CAST(wp_user_id AS CHAR) WHERE issuer_subject = '' OR issuer_subject IS NULL",
             "ALTER TABLE `relayos_user_entitlements` MODIFY source_ref VARCHAR(191) NOT NULL DEFAULT ''",
             "CREATE UNIQUE INDEX IF NOT EXISTS uniq_relayos_user_entitlement_source ON `relayos_user_entitlements` (wp_user_id, entitlement_key, source, source_ref)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_entitlement_issuer_source ON `relayos_user_entitlements` (tenant_id, wp_user_id, entitlement_key, issuer, source, source_ref)",
             "KEY idx_relayos_user_entitlements_source (source, source_ref)",
             "ON DELETE CASCADE",
         ]
@@ -122,6 +133,38 @@ db.raw = async (sql) => {
             self.assertIn(snippet, text)
 
         self.assertNotIn("UNIQUE KEY uniq_relayos_user_entitlement (wp_user_id, entitlement_key)", text)
+
+    def test_schema_defines_platform_entitlement_cache_table(self):
+        script = r"""
+const RelayosEntitlements = require('./kiwibnc/libs/relayos_entitlements');
+const statements = [];
+function db() {}
+db.raw = async (sql) => {
+    statements.push(String(sql).replace(/\s+/g, ' ').trim());
+};
+(async () => {
+    const resolver = new RelayosEntitlements({ db, overlayPath: '' });
+    await resolver.migrateSchema();
+    console.log(JSON.stringify(statements));
+})().catch((err) => {
+    console.error(err.stack || err.message);
+    process.exit(1);
+});
+"""
+        text = " ".join(json.loads(self.run_node(script)))
+
+        expected_snippets = [
+            "CREATE TABLE IF NOT EXISTS `relayos_platform_entitlement_cache`",
+            "`tenant_id` VARCHAR(191) NOT NULL",
+            "`wp_user_id` BIGINT UNSIGNED NOT NULL",
+            "`platform_issuer` VARCHAR(191) NOT NULL",
+            "`platform_subject_id` VARCHAR(191) NOT NULL",
+            "`entitlement_key` VARCHAR(191) NOT NULL",
+            "UNIQUE KEY `uniq_platform_entitlement_cache` (`tenant_id`, `wp_user_id`, `platform_issuer`, `platform_subject_id`, `entitlement_key`)",
+            "CONSTRAINT `fk_platform_entitlement_wp_user` FOREIGN KEY (`wp_user_id`) REFERENCES `wp_users` (`ID`) ON DELETE CASCADE",
+        ]
+        for snippet in expected_snippets:
+            self.assertIn(snippet, text)
 
     def test_schema_migrates_legacy_source_blind_unique_key(self):
         script = r"""
@@ -152,6 +195,10 @@ db.raw = async (sql, bindings) => {
 
         self.assertIn(
             "CREATE UNIQUE INDEX IF NOT EXISTS uniq_relayos_user_entitlement_source ON `relayos_user_entitlements` (wp_user_id, entitlement_key, source, source_ref)",
+            text,
+        )
+        self.assertIn(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_entitlement_issuer_source ON `relayos_user_entitlements` (tenant_id, wp_user_id, entitlement_key, issuer, source, source_ref)",
             text,
         )
         self.assertIn("ALTER TABLE `relayos_user_entitlements` DROP INDEX uniq_relayos_user_entitlement", text)

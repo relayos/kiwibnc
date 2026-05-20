@@ -7,6 +7,7 @@ const DEFAULT_TABLES = Object.freeze({
     entitlements: 'relayos_entitlements',
     entitlementCapabilities: 'relayos_entitlement_capabilities',
     userEntitlements: 'relayos_user_entitlements',
+    platformEntitlementCache: 'relayos_platform_entitlement_cache',
     wpUsers: 'wp_users',
 });
 
@@ -31,6 +32,8 @@ class RelayosEntitlements {
         this.overlayPath = options.overlayPath || this.env.RELAYOS_ENTITLEMENTS_OVERLAY || '';
         this.logger = options.logger || console;
         this.overlayUsers = Object.create(null);
+        this.tenantId = options.tenantId || this.env.RELAYOS_TENANT_ID || 'relayos-tenant';
+        this.defaultIssuer = options.defaultIssuer || this.env.RELAYOS_ENTITLEMENT_DEFAULT_ISSUER || `tenant:${this.tenantId}`;
     }
 
     async init() {
@@ -53,6 +56,7 @@ class RelayosEntitlements {
         const entitlements = quotedIdentifier(this.tables.entitlements);
         const entitlementCapabilities = quotedIdentifier(this.tables.entitlementCapabilities);
         const userEntitlements = quotedIdentifier(this.tables.userEntitlements);
+        const platformEntitlementCache = quotedIdentifier(this.tables.platformEntitlementCache);
         const wpUsers = quotedIdentifier(this.tables.wpUsers);
 
         await this.db.raw(`
@@ -93,6 +97,9 @@ class RelayosEntitlements {
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                 wp_user_id BIGINT UNSIGNED NOT NULL,
                 entitlement_key VARCHAR(191) NOT NULL,
+                tenant_id VARCHAR(191) NOT NULL DEFAULT 'relayos-tenant',
+                issuer VARCHAR(191) NOT NULL DEFAULT 'tenant:relayos-tenant',
+                issuer_subject VARCHAR(191) NOT NULL DEFAULT '',
                 source VARCHAR(64) NOT NULL DEFAULT 'system',
                 source_ref VARCHAR(191) NOT NULL DEFAULT '',
                 status VARCHAR(32) NOT NULL DEFAULT 'active',
@@ -102,13 +109,39 @@ class RelayosEntitlements {
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 PRIMARY KEY (id),
                 UNIQUE KEY uniq_relayos_user_entitlement_source (wp_user_id, entitlement_key, source, source_ref),
+                UNIQUE KEY uniq_user_entitlement_issuer_source (tenant_id, wp_user_id, entitlement_key, issuer, source, source_ref),
                 KEY idx_relayos_user_entitlements_source (source, source_ref),
+                KEY idx_relayos_user_entitlements_issuer (tenant_id, issuer, issuer_subject),
                 KEY idx_relayos_user_entitlements_active (wp_user_id, status, starts_at, expires_at),
                 CONSTRAINT fk_relayos_user_entitlements_wp_user
                     FOREIGN KEY (\`wp_user_id\`) REFERENCES ${wpUsers} (\`ID\`)
                     ON DELETE CASCADE,
                 CONSTRAINT fk_relayos_user_entitlements_entitlement
                     FOREIGN KEY (entitlement_key) REFERENCES ${entitlements} (\`key\`)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
+        `);
+
+        await this.db.raw(`
+            CREATE TABLE IF NOT EXISTS ${platformEntitlementCache} (
+                \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                \`tenant_id\` VARCHAR(191) NOT NULL,
+                \`wp_user_id\` BIGINT UNSIGNED NOT NULL,
+                \`platform_issuer\` VARCHAR(191) NOT NULL,
+                \`platform_subject_id\` VARCHAR(191) NOT NULL,
+                \`entitlement_key\` VARCHAR(191) NOT NULL,
+                \`status\` VARCHAR(32) NOT NULL DEFAULT 'active',
+                \`starts_at\` DATETIME NULL,
+                \`expires_at\` DATETIME NULL,
+                \`synced_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (\`id\`),
+                UNIQUE KEY \`uniq_platform_entitlement_cache\` (\`tenant_id\`, \`wp_user_id\`, \`platform_issuer\`, \`platform_subject_id\`, \`entitlement_key\`),
+                KEY \`idx_platform_entitlement_user\` (\`tenant_id\`, \`wp_user_id\`),
+                CONSTRAINT \`fk_platform_entitlement_wp_user\`
+                    FOREIGN KEY (\`wp_user_id\`) REFERENCES ${wpUsers} (\`ID\`)
+                    ON DELETE CASCADE,
+                CONSTRAINT \`fk_platform_entitlement_key\`
+                    FOREIGN KEY (\`entitlement_key\`) REFERENCES ${entitlements} (\`key\`)
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
         `);
@@ -124,9 +157,42 @@ class RelayosEntitlements {
         `);
 
         await this.db.raw(`
+            ALTER TABLE ${userEntitlements}
+            ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(191) NOT NULL DEFAULT 'relayos-tenant'
+        `);
+
+        await this.db.raw(`
+            ALTER TABLE ${userEntitlements}
+            ADD COLUMN IF NOT EXISTS issuer VARCHAR(191) NOT NULL DEFAULT 'tenant:relayos-tenant'
+        `);
+
+        await this.db.raw(`
+            ALTER TABLE ${userEntitlements}
+            ADD COLUMN IF NOT EXISTS issuer_subject VARCHAR(191) NOT NULL DEFAULT ''
+        `);
+
+        await this.db.raw(`
             UPDATE ${userEntitlements}
             SET source_ref = ''
             WHERE source_ref IS NULL
+        `);
+
+        await this.db.raw(`
+            UPDATE ${userEntitlements}
+            SET tenant_id = ?
+            WHERE tenant_id = '' OR tenant_id IS NULL
+        `, [this.tenantId]);
+
+        await this.db.raw(`
+            UPDATE ${userEntitlements}
+            SET issuer = ?
+            WHERE issuer = '' OR issuer IS NULL
+        `, [this.defaultIssuer]);
+
+        await this.db.raw(`
+            UPDATE ${userEntitlements}
+            SET issuer_subject = CAST(wp_user_id AS CHAR)
+            WHERE issuer_subject = '' OR issuer_subject IS NULL
         `);
 
         await this.db.raw(`
@@ -144,10 +210,27 @@ class RelayosEntitlements {
             ON ${userEntitlements} (wp_user_id, entitlement_key, source, source_ref)
         `);
 
+        await this.db.raw(`
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_entitlement_issuer_source
+            ON ${userEntitlements} (tenant_id, wp_user_id, entitlement_key, issuer, source, source_ref)
+        `);
+
+        await this.db.raw(`
+            CREATE INDEX IF NOT EXISTS idx_relayos_user_entitlements_issuer
+            ON ${userEntitlements} (tenant_id, issuer, issuer_subject)
+        `);
+
         if (await this.indexExists('uniq_relayos_user_entitlement')) {
             await this.db.raw(`
                 ALTER TABLE ${userEntitlements}
                 DROP INDEX uniq_relayos_user_entitlement
+            `);
+        }
+
+        if (await this.indexExists('uniq_relayos_user_entitlement_source')) {
+            await this.db.raw(`
+                ALTER TABLE ${userEntitlements}
+                DROP INDEX uniq_relayos_user_entitlement_source
             `);
         }
     }
