@@ -201,7 +201,7 @@ async function upsertPlatformAccountLink(config, tenantUser, platformSubjectId, 
     await db.raw(
         [
             'INSERT INTO `relayos_platform_links`',
-            '  (tenant_id, wp_user_id, platform_issuer, platform_subject_id, status, linked_at, updated_at)',
+            '  (tenant_id, wp_user_id, platform_issuer, platform_subject_id, status, created_at, updated_at)',
             "VALUES (?, ?, ?, ?, 'active', NOW(), NOW())",
             "ON DUPLICATE KEY UPDATE status = 'active', updated_at = NOW()",
         ].join('\n'),
