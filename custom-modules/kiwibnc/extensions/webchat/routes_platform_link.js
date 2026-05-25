@@ -50,7 +50,10 @@ function buildPlatformLinkConfig(app) {
 function tenantUserFromSession(ctx, user) {
     const state = ctx && ctx.state ? ctx.state : {};
     const authUser = user || state.user || state.authUser || null;
-    const wpUserId = authUser && (authUser.wp_user_id || authUser.wpUserId);
+    const modelWpUserId = authUser && typeof authUser.getData === 'function'
+        ? authUser.getData('wp_user_id')
+        : null;
+    const wpUserId = authUser && (authUser.wp_user_id || authUser.wpUserId || modelWpUserId);
 
     if (!wpUserId) {
         return null;

@@ -147,6 +147,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "Authorization",
             "Bearer",
             "authUserToken",
+            "getData('wp_user_id')",
             "setPlatformLinkStateCookie",
             "readPlatformLinkStateCookie",
             "Platform account link requires BNC login",
