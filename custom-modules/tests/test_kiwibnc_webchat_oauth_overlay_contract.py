@@ -183,6 +183,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "ctx.query.state",
             "ctx.query.code",
             "platform_user_id",
+            "userinfo.ID",
             "platform_subject_id",
             "`wp_user:${platformUserId}`",
             "Platform account linked",

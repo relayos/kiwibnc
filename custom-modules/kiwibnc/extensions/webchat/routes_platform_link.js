@@ -176,7 +176,7 @@ async function exchangePlatformOauthCode(config, code, httpPost) {
     const userinfo = await requestJson(config.userinfoUrl, {
         headers: { authorization: `Bearer ${accessToken}` },
     });
-    const platformUserId = userinfo.platform_user_id || userinfo.wp_user_id || userinfo.id || userinfo.sub;
+    const platformUserId = userinfo.platform_user_id || userinfo.wp_user_id || userinfo.ID || userinfo.id || userinfo.sub;
     const platformSubjectId = userinfo.platform_subject_id || `wp_user:${platformUserId}`;
     if (!platformUserId || !platformSubjectId) {
         throw new Error('Platform OAuth userinfo missing platform_user_id or platform_subject_id');
