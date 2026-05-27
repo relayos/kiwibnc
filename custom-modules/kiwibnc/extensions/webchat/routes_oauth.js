@@ -5,9 +5,15 @@ const { URL, URLSearchParams } = require('url');
 const bcrypt = require('bcrypt');
 const createLogger = require('../../libs/logger');
 const Helpers = require('../../libs/helpers');
+const RelayosEntitlements = require('../../libs/relayos_entitlements');
 const { ensureBncWordPressProvisioning } = require('./provision_bnc');
 const l = createLogger('webchat-oauth');
 const DEFAULT_TENANT_ID = process.env.RELAYOS_TENANT_ID || 'relayos-tenant';
+const DEFAULT_REQUIRED_ENTITLEMENTS = [
+    'relaybnc-subscriber',
+    'relaybnc-active-subscriber',
+    'active-subscriber',
+];
 
 function parseBool(value, def) {
     if (typeof value === 'undefined' || value === null || value === '') {
@@ -19,6 +25,14 @@ function parseBool(value, def) {
 function parsePort(value, def) {
     const port = Number(value);
     return Number.isInteger(port) && port > 0 ? port : def;
+}
+
+function parseList(value, def) {
+    const items = String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    return items.length ? items : def.slice();
 }
 
 function buildDefaultNetwork(webchat) {
@@ -51,6 +65,15 @@ function buildOauthConfig(app) {
     const userInfoUrl = conf('KIWIBNC_OAUTH_USERINFO_URL', 'oauth_userinfo_url');
     const scope = conf('KIWIBNC_OAUTH_SCOPE', 'oauth_scope', 'openid profile email');
     const tenantId = conf('RELAYOS_TENANT_ID', 'tenant_id', DEFAULT_TENANT_ID);
+    const requiredEntitlements = parseList(
+        conf('RELAYOS_KIWIBNC_REQUIRED_ENTITLEMENTS', 'oauth_required_entitlements'),
+        DEFAULT_REQUIRED_ENTITLEMENTS
+    );
+    const unentitledRedirectUrl = conf(
+        'KIWIBNC_UNENTITLED_REDIRECT_URL',
+        'oauth_unentitled_redirect_url',
+        'https://chat.s.getrelayos.com/'
+    );
 
     l.info('OAuth config values', {
         clientId: !!clientId,
@@ -78,6 +101,8 @@ function buildOauthConfig(app) {
         allowRegistration: false,
         defaultNetwork: buildDefaultNetwork(webchat),
         tenantId,
+        requiredEntitlements,
+        unentitledRedirectUrl,
     };
 }
 
@@ -201,6 +226,46 @@ function respondError(ctx, message) {
     ctx.body = `<!doctype html><html><body><p>${message}</p><a href="/">Back</a></body></html>`;
 }
 
+function htmlEscape(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderBncUpgradeRedirectPage(ctx, oauthConf) {
+    const redirectUrl = oauthConf.unentitledRedirectUrl || 'https://chat.s.getrelayos.com/';
+    const safeRedirectUrl = htmlEscape(redirectUrl);
+    const jsRedirectUrl = JSON.stringify(redirectUrl)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026');
+    ctx.status = 403;
+    ctx.type = 'text/html';
+    ctx.body = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="8; url=${safeRedirectUrl}">
+  <title>RelayBNC subscription required</title>
+</head>
+<body>
+  <div role="dialog" aria-labelledby="relaybnc-upgrade-title" aria-describedby="relaybnc-upgrade-copy">
+    <h1 id="relaybnc-upgrade-title">RelayBNC requires an active subscription</h1>
+    <p id="relaybnc-upgrade-copy">Your WordPress account is valid, but this BNC is available to RelayBNC subscribers. Continue in KiwiIRC or upgrade from the chat experience.</p>
+    <p><a href="${safeRedirectUrl}">Continue to KiwiIRC</a></p>
+  </div>
+  <script>
+    window.setTimeout(function () {
+      window.location.href = ${jsRedirectUrl};
+    }, 8000);
+  </script>
+</body>
+</html>`;
+}
+
 function resolveWordPressIdentity(userInfo) {
     // This OAuth route maps tenant WordPress users to tenant-local BNC users.
     // Platform OAuth account linking is a separate flow and must not provision BNC users.
@@ -322,6 +387,28 @@ async function ensureOAuthUser(app, identity, defaultNetwork) {
     return user;
 }
 
+async function isRelayBncLoginEntitled(app, identity, oauthConf) {
+    const required = oauthConf.requiredEntitlements || DEFAULT_REQUIRED_ENTITLEMENTS;
+    if (!required.length) {
+        return true;
+    }
+
+    const resolver = new RelayosEntitlements({
+        db: app && app.db && app.db.dbUsers,
+        logger: global.l || console,
+        tenantId: oauthConf.tenantId,
+    });
+    await resolver.init();
+    const user = {
+        username: identity.username,
+        wp_user_id: identity.wpUserId,
+    };
+    const entitlements = typeof resolver.getEffectiveUserEntitlements === 'function'
+        ? await resolver.getEffectiveUserEntitlements(user)
+        : await resolver.getUserEntitlements(user);
+    return entitlements.some((key) => required.includes(key));
+}
+
 async function ensureWordPressLinkage(app, defaultNetwork = buildDefaultNetwork({})) {
     return ensureBncWordPressProvisioning(app, defaultNetwork);
 }
@@ -402,6 +489,10 @@ function registerRoutes(app) {
         let mappedUser;
         try {
             const identity = resolveWordPressIdentity(userInfo);
+            if (!(await isRelayBncLoginEntitled(app, identity, oauthConf))) {
+                l.info('OAuth denied RelayBNC login for unentitled user', { username: identity.username });
+                return renderBncUpgradeRedirectPage(ctx, oauthConf);
+            }
             mappedUser = await ensureOAuthUser(app, identity, oauthConf.defaultNetwork);
         } catch (err) {
             l.warn('OAuth rejected login:', err.message);
@@ -444,6 +535,8 @@ module.exports = {
     __testHooks: {
         resolveWordPressIdentity,
         ensureOAuthUser,
+        isRelayBncLoginEntitled,
+        renderBncUpgradeRedirectPage,
         buildDefaultNetwork,
         generateRelayBncSaslSecret,
         ensureRelayBncSaslCredential,

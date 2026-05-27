@@ -343,6 +343,7 @@ const RelayosEntitlements = require('./kiwibnc/libs/relayos_entitlements');
             "async_message.send.same_tenant",
             "async_message.receive.same_tenant",
             "active-subscriber",
+            "relaybnc-subscriber",
             "relaybnc-active-subscriber",
             "lucky",
             "parseOverlay",

@@ -129,6 +129,34 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         self.assertIn("require('./provision_bnc')", text)
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*ensureBncWordPressProvisioning")
 
+    def test_routes_oauth_denies_unentitled_bnc_login_before_token_issue(self):
+        text = self.read_overlay("routes_oauth.js")
+
+        expected_snippets = [
+            "RelayosEntitlements",
+            "RELAYOS_KIWIBNC_REQUIRED_ENTITLEMENTS",
+            "relaybnc-subscriber",
+            "relaybnc-active-subscriber",
+            "active-subscriber",
+            "isRelayBncLoginEntitled",
+            "renderBncUpgradeRedirectPage",
+            "KIWIBNC_UNENTITLED_REDIRECT_URL",
+            "RelayBNC requires an active subscription",
+            "role=\"dialog\"",
+            "Continue to KiwiIRC",
+            "meta http-equiv=\"refresh\"",
+            "await isRelayBncLoginEntitled(app, identity, oauthConf)",
+            "return renderBncUpgradeRedirectPage(ctx, oauthConf)",
+            "mappedUser = await ensureOAuthUser(app, identity, oauthConf.defaultNetwork)",
+        ]
+        for snippet in expected_snippets:
+            self.assertIn(snippet, text)
+
+        self.assertLess(
+            text.index("await isRelayBncLoginEntitled(app, identity, oauthConf)"),
+            text.index("mappedUser = await ensureOAuthUser(app, identity, oauthConf.defaultNetwork)"),
+        )
+
     def test_platform_link_route_contract_is_tenant_bound(self):
         text = self.read_overlay("routes_platform_link.js")
         index = self.read_overlay("index.js")

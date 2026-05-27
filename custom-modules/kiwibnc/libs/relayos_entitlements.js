@@ -13,6 +13,12 @@ const DEFAULT_TABLES = Object.freeze({
 });
 
 const DEFAULT_ENTITLEMENTS = Object.freeze({
+    'relaybnc-subscriber': Object.freeze([
+        'async_message.send.same_tenant',
+        'async_message.receive.same_tenant',
+        'async_message.send_to_offline',
+        'async_message.receive_from_anyone',
+    ]),
     'relaybnc-active-subscriber': Object.freeze([
         'async_message.send.same_tenant',
         'async_message.receive.same_tenant',
