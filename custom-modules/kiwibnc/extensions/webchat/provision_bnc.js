@@ -26,6 +26,7 @@ function networkConfig(defaultNetwork = {}) {
         host: defaultNetwork.host || 'inspircd',
         port: Number(defaultNetwork.port || 6667),
         tls: boolToSql(defaultNetwork.tls),
+        tlsverify: boolToSql(defaultNetwork.tlsverify !== false),
         channels: defaultNetwork.channels || '',
     };
 }
@@ -115,12 +116,12 @@ BEGIN
   VALUES (NEW.user_login, bcrypt_hash(CONCAT('oauth-unusable-', UUID()), 10), 0, COALESCE(UNIX_TIMESTAMP(NEW.user_registered), UNIX_TIMESTAMP()), NEW.ID)
   ON DUPLICATE KEY UPDATE username = VALUES(username), wp_user_id = VALUES(wp_user_id);
 
-  INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, password, sasl_account, sasl_pass, channels)
-  SELECT id, ?, ?, ?, ?, username, username, username, '', username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
+  INSERT INTO ${networksTable} (user_id, name, host, port, tls, tlsverify, nick, username, realname, password, sasl_account, sasl_pass, channels)
+  SELECT id, ?, ?, ?, ?, ?, username, username, username, '', username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
     FROM ${usersTable}
    WHERE wp_user_id = NEW.ID
-  ON DUPLICATE KEY UPDATE nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname), sasl_account = VALUES(sasl_account);
-END`, [network.name, network.host, network.port, network.tls, network.channels]);
+  ON DUPLICATE KEY UPDATE host = VALUES(host), port = VALUES(port), tls = VALUES(tls), tlsverify = VALUES(tlsverify), nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname), sasl_account = VALUES(sasl_account);
+END`, [network.name, network.host, network.port, network.tls, network.tlsverify, network.channels]);
 
     await knex.raw(`
 CREATE TRIGGER wordpress_users_bnc_after_update
@@ -131,12 +132,12 @@ BEGIN
      SET username = NEW.user_login
    WHERE wp_user_id = NEW.ID;
 
-  INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, password, sasl_account, sasl_pass, channels)
-  SELECT id, ?, ?, ?, ?, username, username, username, '', username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
+  INSERT INTO ${networksTable} (user_id, name, host, port, tls, tlsverify, nick, username, realname, password, sasl_account, sasl_pass, channels)
+  SELECT id, ?, ?, ?, ?, ?, username, username, username, '', username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
     FROM ${usersTable}
    WHERE wp_user_id = NEW.ID
-  ON DUPLICATE KEY UPDATE nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname), sasl_account = VALUES(sasl_account);
-END`, [network.name, network.host, network.port, network.tls, network.channels]);
+  ON DUPLICATE KEY UPDATE host = VALUES(host), port = VALUES(port), tls = VALUES(tls), tlsverify = VALUES(tlsverify), nick = VALUES(nick), username = VALUES(username), realname = VALUES(realname), sasl_account = VALUES(sasl_account);
+END`, [network.name, network.host, network.port, network.tls, network.tlsverify, network.channels]);
 
     await knex.raw(`
 CREATE TRIGGER wordpress_users_bnc_after_delete
@@ -170,13 +171,14 @@ async function backfillWordPressUsers(knex, defaultNetwork) {
     );
 
     await knex.raw(
-        `INSERT INTO ${networksTable} (user_id, name, host, port, tls, nick, username, realname, password, sasl_account, sasl_pass, channels)
-         SELECT bnc.id, ?, ?, ?, ?, bnc.username, bnc.username, bnc.username, '', bnc.username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
+        `INSERT INTO ${networksTable} (user_id, name, host, port, tls, tlsverify, nick, username, realname, password, sasl_account, sasl_pass, channels)
+         SELECT bnc.id, ?, ?, ?, ?, ?, bnc.username, bnc.username, bnc.username, '', bnc.username, 'RELAYOS_BNC_SASL_UNPROVISIONED', ?
            FROM ${usersTable} bnc
            JOIN \`wp_users\` wp ON wp.ID = bnc.wp_user_id
            LEFT JOIN ${networksTable} net ON net.user_id = bnc.id AND net.name = ?
-          WHERE net.id IS NULL`,
-        [network.name, network.host, network.port, network.tls, network.channels, network.name]
+          WHERE net.id IS NULL
+         ON DUPLICATE KEY UPDATE host = VALUES(host), port = VALUES(port), tls = VALUES(tls), tlsverify = VALUES(tlsverify)`,
+        [network.name, network.host, network.port, network.tls, network.tlsverify, network.channels, network.name]
     );
 }
 

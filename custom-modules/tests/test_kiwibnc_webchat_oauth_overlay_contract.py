@@ -85,6 +85,8 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             "ensureRelayBncSaslCredential",
             "sasl_account",
             "sasl_pass",
+            "tlsverify",
+            "network.tlsverify = defaultNetwork.tlsverify",
             "network.sasl_account = username",
             "network.sasl_pass = saslSecret",
             "await network.save()",
@@ -92,6 +94,7 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
             self.assertIn(snippet, routes)
 
         for snippet in [
+            "tlsverify",
             "sasl_account, sasl_pass",
             "RELAYOS_BNC_SASL_UNPROVISIONED",
         ]:

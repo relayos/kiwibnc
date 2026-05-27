@@ -45,6 +45,7 @@ function buildDefaultNetwork(webchat) {
         host: conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_HOST', 'oauth_default_network_host', 'inspircd'),
         port: parsePort(conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_PORT', 'oauth_default_network_port', '6667'), 6667),
         tls: parseBool(conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_TLS', 'oauth_default_network_tls', 'false'), false),
+        tlsverify: parseBool(conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_TLSVERIFY', 'oauth_default_network_tlsverify', 'true'), true),
         channels: conf('RELAYOS_KIWIBNC_DEFAULT_NETWORK_CHANNELS', 'oauth_default_network_channels', ''),
     };
 }
@@ -326,6 +327,7 @@ function buildUserNetwork(defaultNetwork, username, saslSecret) {
         host: defaultNetwork.host,
         port: defaultNetwork.port,
         tls: defaultNetwork.tls,
+        tlsverify: defaultNetwork.tlsverify,
         nick: username,
         username,
         realname: username,
@@ -360,6 +362,7 @@ async function ensureDefaultNetwork(app, user, defaultNetwork, wpUserId) {
         network.host = defaultNetwork.host;
         network.port = defaultNetwork.port;
         network.tls = defaultNetwork.tls;
+        network.tlsverify = defaultNetwork.tlsverify;
         network.sasl_account = username;
         network.sasl_pass = saslSecret;
         await network.save();
