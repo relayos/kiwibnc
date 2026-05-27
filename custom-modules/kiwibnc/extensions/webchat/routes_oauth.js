@@ -357,6 +357,9 @@ async function ensureDefaultNetwork(app, user, defaultNetwork, wpUserId) {
         network.nick = username;
         network.username = username;
         network.realname = username;
+        network.host = defaultNetwork.host;
+        network.port = defaultNetwork.port;
+        network.tls = defaultNetwork.tls;
         network.sasl_account = username;
         network.sasl_pass = saslSecret;
         await network.save();

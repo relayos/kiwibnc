@@ -129,6 +129,16 @@ class KiwiBncWebchatOauthOverlayContractTests(unittest.TestCase):
         self.assertIn("require('./provision_bnc')", text)
         self.assertRegex(text, r"module\.exports\s*=\s*\{[^}]*ensureBncWordPressProvisioning")
 
+    def test_routes_oauth_updates_existing_default_network_endpoint(self):
+        text = self.read_overlay("routes_oauth.js")
+
+        for snippet in [
+            "network.host = defaultNetwork.host",
+            "network.port = defaultNetwork.port",
+            "network.tls = defaultNetwork.tls",
+        ]:
+            self.assertIn(snippet, text)
+
     def test_routes_oauth_denies_unentitled_bnc_login_before_token_issue(self):
         text = self.read_overlay("routes_oauth.js")
 
